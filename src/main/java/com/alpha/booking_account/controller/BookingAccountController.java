@@ -57,7 +57,7 @@ public class BookingAccountController {
             return ResponseEntity.status(HttpStatus.OK).body(responseGlobalModel);
         } catch (Exception e) {
             Map<String, Object> errorBody = new HashMap<>();
-            errorBody.put("resultCode", 500);
+            errorBody.put("resultCode", Optional.of(500));
             errorBody.put("timestamp", serviceTool.generateTimestamp());
             errorBody.put("message", "Failed to save client:");
             Map<String, String> error = new HashMap<>();
@@ -129,7 +129,7 @@ public class BookingAccountController {
                     File folders = new File(folder);
                     if (!folders.exists()) {
                         boolean created = folders.mkdirs();
-                        logger.info("Directory created: {}", created);
+                        logger.info("Directory created: {}", Optional.of(created));
                         if (!created) {
                             logger.error("Failed to create directory: {}", folder);
                         }
@@ -164,7 +164,7 @@ public class BookingAccountController {
         } catch (CustomException e) {
             logger.error("Error handling request", e);
             Map<String, Object> errorBody = new HashMap<>();
-            errorBody.put("resultCode", e.getResultCode());
+            errorBody.put("resultCode", Optional.of(e.getResultCode()));
             errorBody.put("timestamp", serviceTool.generateTimestamp());
             errorBody.put("message", e.getMessage());
             Map<String, String> error = new HashMap<>();
