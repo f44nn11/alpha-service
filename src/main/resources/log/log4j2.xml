@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration>
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%style{%d{ISO8601}}{black} %highlight{%-5level} [%style{%t}{bright,blue}] %style{%C{1.}}{bright,yellow}: %msg%n%throwable" />
+        </Console>
+
+        <RollingFile name="RollingFile" fileName="/app/log/alpha-service.log"
+                     filePattern="/app/log/alpha-service/$${date:yyyy-MM}/alpha-service-logger-%d{-dd-MMMM-yyyy}-%i.log.gz">
+            <PatternLayout>
+                <pattern>%d %p %C{1.} [%t] %m%n</pattern>
+            </PatternLayout>
+            <Policies>
+                <OnStartupTriggeringPolicy />
+                <SizeBasedTriggeringPolicy size="250 MB" />
+                <TimeBasedTriggeringPolicy />
+            </Policies>
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <Logger name="com.alpha" level="info" additivity="false">
+            <AppenderRef ref="Console" />
+            <AppenderRef ref="RollingFile" />
+        </Logger>
+        <!-- Logger Spring Framework -->
+        <Logger name="org.springframework" level="warn" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+
+        <!-- Root Logger -->
+        <Root level="info">
+            <AppenderRef ref="Console" />
+            <AppenderRef ref="RollingFile" />
+        </Root>
+    </Loggers>
+</Configuration>
