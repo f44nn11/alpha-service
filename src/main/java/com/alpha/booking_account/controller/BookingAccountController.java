@@ -6,6 +6,8 @@ import com.alpha.booking_account.helper.BookingAccountHelper;
 import com.alpha.booking_account.model.BookingAccountModel;
 import com.alpha.booking_account.model.procedure.UspBookingAccountGetParam;
 import com.alpha.booking_account.model.response.ResponseGlobalModel;
+import com.alpha.booking_account.model.sendemail.EmailRequestModel;
+import com.alpha.booking_account.service.BookingService;
 import com.alpha.booking_account.util.DataUtil;
 import com.alpha.booking_account.util.ServiceTool;
 import com.google.gson.Gson;
@@ -42,9 +44,11 @@ public class BookingAccountController {
     @Autowired
     private BookingAccountHelper helper;
     @Autowired
-    ServiceTool serviceTool;
+    private ServiceTool serviceTool;
     @Autowired
-    DataUtil dataUtil;
+    private DataUtil dataUtil;
+    @Autowired
+    private BookingService  bookingService;
 
     @PostMapping("/doaccount")
     public ResponseEntity<Object> doDataBookingAccount(@RequestBody @Valid UspBookingAccountGetParam bpm) {
@@ -158,6 +162,16 @@ public class BookingAccountController {
                 });
 
                 responseGlobalModel = helper.doProcessBookingIUD(bookingAccountModel,bookCd,"2");
+            }
+
+            if (responseGlobalModel.getResultCode() == 200) {
+                EmailRequestModel emailRequestModel = new EmailRequestModel();
+                emailRequestModel.setMailType("BK");
+                emailRequestModel.setActionType("1");
+                bookingService.sendEmailService(
+                        new Gson().toJson(emailRequestModel),
+                        docTypes.stream().map(BookingAccountModel.DocType::getUrlPath).toList()
+                );
             }
 
             return ResponseEntity.status(HttpStatus.OK).body(responseGlobalModel);
