@@ -4,6 +4,7 @@ package com.alpha.booking_account.service;
 import com.alpha.booking_account.service.sendemail.EmailServiceClient;
 import com.alpha.booking_account.util.ServiceTool;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;

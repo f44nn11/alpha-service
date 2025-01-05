@@ -8,6 +8,7 @@ import com.alpha.booking_account.model.procedure.UspBookingAccountGetParam;
 import com.alpha.booking_account.model.response.ResponseGlobalModel;
 import com.alpha.booking_account.model.sendemail.EmailRequestModel;
 import com.alpha.booking_account.service.BookingService;
+import com.alpha.booking_account.service.sendemail.EmailService;
 import com.alpha.booking_account.util.DataUtil;
 import com.alpha.booking_account.util.ServiceTool;
 import com.google.gson.Gson;
@@ -48,7 +49,9 @@ public class BookingAccountController {
     @Autowired
     private DataUtil dataUtil;
     @Autowired
-    private BookingService  bookingService;
+    private BookingService bookingService;
+    @Autowired
+    private EmailService emailService;
 
     @PostMapping("/doaccount")
     public ResponseEntity<Object> doDataBookingAccount(@RequestBody @Valid UspBookingAccountGetParam bpm) {
@@ -85,6 +88,7 @@ public class BookingAccountController {
 
             BookingAccountModel bookingAccountModel = new Gson().fromJson(data, BookingAccountModel.class);
             List<BookingAccountModel.DocType> docTypes = new ArrayList<>();
+            List<MultipartFile> attachments = new ArrayList<>(files.values());
             ResponseGlobalModel<Object> responseGlobalModel = new ResponseGlobalModel<>();
 
             // 1. Proses Header
@@ -108,69 +112,75 @@ public class BookingAccountController {
             responseGlobalModel.setResultCode(200);
             responseGlobalModel.setMessage(headerResponse.getMessage());
             responseGlobalModel.setData(headerResponse.getData());
+            System.out.println("<===files==>" + files);
+            if (!bookingAccountModel.getActionType().equalsIgnoreCase("3")) {
+                if (!files.isEmpty()) {
+                    // 2. Proses Detail
+                    files.forEach((code, file) -> {
+                        BookingAccountModel.DocType docType = new BookingAccountModel.DocType();
+                        String fileName = Objects.requireNonNull(file.getOriginalFilename()).replaceAll("[^a-zA-Z0-9\\.\\-_]+", "_");
 
-            if (!bookingAccountModel.getActionType().equalsIgnoreCase("3")){
-                // 2. Proses Detail
-                files.forEach((code, file) -> {
-                    BookingAccountModel.DocType docType = new BookingAccountModel.DocType();
-                    String fileName = Objects.requireNonNull(file.getOriginalFilename()).replaceAll("[^a-zA-Z0-9\\.\\-_]+", "_");
+                        String baseName = fileName.substring(0, fileName.lastIndexOf('.'));
+                        String extension = fileName.substring(fileName.lastIndexOf('.'));
 
-                    String baseName = fileName.substring(0, fileName.lastIndexOf('.'));
-                    String extension = fileName.substring(fileName.lastIndexOf('.'));
-
-                    String docTypeOri = file.getName();
-                    String docTypeDesc = switch (code) {
-                        case "1" -> "memberlist";
-                        case "2" -> "benefit";
-                        case "3" -> "claimdetail";
-                        case "4" -> "claimratio";
-                        case "5" -> "termcondition";
-                        case "6" -> "loa";
-                        default -> docTypeOri;
-                    };
-                    logger.info("docTypeDesc==>{}", docTypeDesc);
-                    String folder = dataUtil.getPathUpload() + "/" + bookCd + "/" + docTypeDesc;
-                    File folders = new File(folder);
-                    if (!folders.exists()) {
-                        boolean created = folders.mkdirs();
-                        logger.info("Directory created: {}", Optional.of(created));
-                        if (!created) {
-                            logger.error("Failed to create directory: {}", folder);
+                        String docTypeOri = file.getName();
+                        String docTypeDesc = switch (code) {
+                            case "1" -> "memberlist";
+                            case "2" -> "benefit";
+                            case "3" -> "claimdetail";
+                            case "4" -> "claimratio";
+                            case "5" -> "termcondition";
+                            case "6" -> "loa";
+                            default -> docTypeOri;
+                        };
+                        logger.info("docTypeDesc==>{}", docTypeDesc);
+                        String folder = dataUtil.getPathUpload() + "/" + bookCd + "/" + docTypeDesc;
+                        File folders = new File(folder);
+                        if (!folders.exists()) {
+                            boolean created = folders.mkdirs();
+                            logger.info("Directory created: {}", Optional.of(created));
+                            if (!created) {
+                                logger.error("Failed to create directory: {}", folder);
+                            }
                         }
-                    }
 
-                    int counter = calculateRevisionNumber(folder, baseName, extension);
-                    String newName = baseName + "_rev" + counter + extension;
+                        int counter = calculateRevisionNumber(folder, baseName, extension);
+                        String newName = baseName + "_rev" + counter + extension;
 
-                    try {
-                        Path pathDoc = Paths.get(folder, newName);
-                        InputStream inDoc = file.getInputStream();
-                        Files.copy(inDoc, pathDoc);
-                        logger.info("Revised file saved as {}", pathDoc);
+                        try {
+                            Path pathDoc = Paths.get(folder, newName);
+                            InputStream inDoc = file.getInputStream();
+                            Files.copy(inDoc, pathDoc);
+                            logger.info("Revised file saved as {}", pathDoc);
 
 
-                        docType.setCode(code);
-                        docType.setRevDoc(String.valueOf(counter));
-                        docType.setDescp(docTypeDesc);
-                        docType.setUrlPath(pathDoc.toString().replace(File.separatorChar, '/'));
+                            docType.setCode(code);
+                            docType.setRevDoc(String.valueOf(counter));
+                            docType.setDescp(docTypeDesc);
+                            docType.setUrlPath(pathDoc.toString().replace(File.separatorChar, '/'));
 
-                        docTypes.add(docType);
-                    } catch (IOException e) {
-                        logger.error("Failed to save file", e);
-                    }
-                    bookingAccountModel.setDocTypes(docTypes);
-                });
+                            docTypes.add(docType);
 
-                responseGlobalModel = helper.doProcessBookingIUD(bookingAccountModel,bookCd,"2");
+                        } catch (IOException e) {
+                            logger.error("Failed to save file", e);
+                        }
+                        bookingAccountModel.setDocTypes(docTypes);
+                    });
+                }
+                if (bookingAccountModel.getDocTypes() != null) {
+                    responseGlobalModel = helper.doProcessBookingIUD(bookingAccountModel, bookCd, "2");
+                }
             }
 
             if (responseGlobalModel.getResultCode() == 200) {
                 EmailRequestModel emailRequestModel = new EmailRequestModel();
                 emailRequestModel.setMailType("BK");
                 emailRequestModel.setActionType("1");
-                bookingService.sendEmailService(
+                emailRequestModel.setBookCd(bookCd);
+                emailRequestModel.setClientName(bookingAccountModel.getClientName());
+                emailService.sendEmailWithAttachments(
                         new Gson().toJson(emailRequestModel),
-                        docTypes.stream().map(BookingAccountModel.DocType::getUrlPath).toList()
+                        attachments, serviceTool.getProperty("email.service.url") + "/email/send"
                 );
             }
 
