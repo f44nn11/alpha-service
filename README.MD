@@ -14,3 +14,6 @@ docker run -d \
 -v D:/PROJECT/MARIADB:/var/lib/mysql \
 -p 3306:3306 \
 mariadb:latest
+
+docker exec -it my-mariadb bash
+ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
