@@ -4,16 +4,17 @@ package com.alpha.service.service;
 import com.alpha.service.model.ProcedureParamModel;
 import com.alpha.service.model.response.ResponseGlobalModel;
 import com.alpha.service.repository.BookingAccountRepository;
+import com.alpha.service.util.ProcedureParamUtils;
 import com.google.gson.Gson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.*;
 
 /*
  * Created by: fkusu
@@ -26,11 +27,14 @@ public class BookingAccountSIUDService {
     @Autowired
     private BookingAccountRepository repository;
 
+
+
     public ResponseGlobalModel<Object> bookingAccountProcedure(String procedureName,
                                                                List<ProcedureParamModel> params) {
         ResponseGlobalModel<Object> responseGlobalModel = new ResponseGlobalModel<>();
         try {
             logger.info("param===>" + params.toString());
+
             Map<String, Object> results = repository.callBookingAccountSIUDProcedure(procedureName, params);
 
             responseGlobalModel.setResultCode((Integer) results.get("p_resultCode"));

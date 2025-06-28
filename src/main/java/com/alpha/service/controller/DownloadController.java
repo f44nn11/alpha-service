@@ -23,7 +23,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/download")
-@CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true",
+@CrossOrigin(origins = {"http://localhost:3000", "http://192.168.1.2:3000"}, allowCredentials = "true" ,
         allowedHeaders = {"Content-Type", "Authorization", "X-Requested-With"})
 public class DownloadController {
     private static final Logger logger = LoggerFactory.getLogger(BookingAccountController.class);

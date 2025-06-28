@@ -19,7 +19,8 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/master")
-@CrossOrigin(origins = "http://localhost:3000")
+@CrossOrigin(origins = {"http://localhost:3000", "http://192.168.1.2:3000"}, allowCredentials = "true" ,
+        allowedHeaders = {"Content-Type", "Authorization", "X-Requested-With"})
 @Validated
 public class MasterClienController {
     private static final Logger logger = LoggerFactory.getLogger(SyspropMasterController.class);

@@ -23,7 +23,7 @@ public class BookingAccountModel {
     private String bookDate;
     private SysProp prevIns;
     private String insName;
-    private String issueDate;
+    private String effDate;
     private String expDate;
     private String premiumBudget;
     private String totMembers;
@@ -33,11 +33,14 @@ public class BookingAccountModel {
     private String mt;
     private String gl;
     private String description;
+    private String descriptionDtl;
     private String status;
     private List<DocType> docTypes;
     private List<InsPlacing> insPlacing;
     private String createdBy;
     private String actionType;
+    private String revDoc;
+    private String bookRev;
 
     @Data
     public static class DocType {
@@ -45,6 +48,7 @@ public class BookingAccountModel {
         private String revDoc;
         private String descp;
         private String urlPath;
+        private String actionType;
     }
 
     @Data

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -21,28 +22,11 @@ public class BookingService {
     @Autowired
     private EmailServiceClient emailServiceClient;
 
+    @Autowired
+    private ServiceTool serviceTool;
+
 
     public void sendEmailService(String data, List<String> attachmentPaths) {
-        try {
-            List<MultipartFile> attachments = attachmentPaths.stream()
-                    .map(filePath -> {
-                        try {
-                            return ServiceTool.convertToMultipartFile(filePath);
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    })
-                    .filter(Objects::nonNull) // Hanya gunakan file yang berhasil dikonversi
-                    .toList();
-
-            ResponseEntity<String> response = emailServiceClient.sendEmail(data, attachments);
-            if (response.getStatusCode().is2xxSuccessful()) {
-                System.out.println("Email sent successfully!");
-            } else {
-                System.err.println("Failed to send email: " + response.getBody());
-            }
-        } catch (Exception e) {
-            System.err.println("Error sending email: " + e.getMessage());
-        }
+        System.out.printf("Sending email service data: %s\n", data);
     }
 }

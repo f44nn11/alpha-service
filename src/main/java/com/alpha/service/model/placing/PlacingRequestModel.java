@@ -10,18 +10,33 @@ import java.util.List;
  * Date: 1/19/2025
  */
 @Data
-public class PlacingRequestModel {
+public class PlacingRequestModel implements PlacingInterface {
     private String placingCd;
     private String bookCd;
     private String placingDate;
+    private String description;
     private String createdBy;
     private String actionType;
     private List<Insurance> insurances;
+
+
+    @Override
+    public String getPlacingCd() {
+        return placingCd;
+    }
+
+    @Override
+    public void setPlacingCd(String placingCd) {
+        this.placingCd = placingCd;
+    }
 
     @Data
     public static class Insurance {
         private int insCd;
         private String insName;
+        private String placingDate;
+        private String descriptionDtl;
+        private String status;
         private List<DocType> docTypes;
     }
     @Data
@@ -30,5 +45,7 @@ public class PlacingRequestModel {
         private String revDoc;
         private String descp;
         private String urlPath;
+        private boolean isGlobal;
+        private boolean isPerInsurance;
     }
 }

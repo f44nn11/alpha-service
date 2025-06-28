@@ -11,6 +11,7 @@ import lombok.Data;
 public class UspPlacingAccountParam {
     private String placingCd;
     private String bookCd;
+    private String description;
     private String placingDate;
     private String insPlacing;
     private String createdBy;

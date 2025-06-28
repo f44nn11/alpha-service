@@ -11,9 +11,16 @@ import lombok.Data;
 public class UspBookingAccountDtlParam {
     private String bookCd;
     private String revDoc;
-    private String description;
-    private String docType;
-    private String pathDoc;
+    private String premiumBudget;
+    private String totMembers;
+    private String ip;
+    private String op;
+    private String dt;
+    private String mt;
+    private String gl;
+    private String descriptionDtl;
     private String createdBy;
     private String actionType;
+    private String insPlacing;
+    private String docTypes;
 }

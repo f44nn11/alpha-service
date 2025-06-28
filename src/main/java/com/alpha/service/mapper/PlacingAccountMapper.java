@@ -21,6 +21,8 @@ public interface PlacingAccountMapper {
     PlacingAccountMapper INSTANCE = Mappers.getMapper(PlacingAccountMapper.class);
 
     @Mapping(target = "placingCd", source = "placingCd")
+    @Mapping(target = "bookCd", source = "bookCd")
+    @Mapping(target = "description", source = "description")
     @Mapping(target = "insPlacing", source = "insurances", qualifiedByName = "mapInsPlacingToJson")
     UspPlacingAccountParam toUspPlacingAccountParam(PlacingRequestModel model);
 

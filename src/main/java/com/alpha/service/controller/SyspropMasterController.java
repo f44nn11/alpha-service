@@ -3,6 +3,7 @@ package com.alpha.service.controller;
 import com.alpha.service.helper.GeodataHelper;
 import com.alpha.service.model.SystemPropertiesModel;
 import com.alpha.service.model.response.ResponseGlobalModel;
+import com.alpha.service.model.sendemail.ErrorReportRequestModel;
 import com.alpha.service.service.SyspropService;
 import com.alpha.service.util.ServiceTool;
 import jakarta.validation.Valid;
@@ -19,7 +20,8 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/sysprop")
-@CrossOrigin(origins = "*")
+@CrossOrigin(origins = {"http://localhost:3000", "http://192.168.1.2:3000"}, allowCredentials = "true" ,
+        allowedHeaders = {"Content-Type", "Authorization", "X-Requested-With"})
 @Validated
 public class SyspropMasterController {
     private static final Logger logger = LoggerFactory.getLogger(SyspropMasterController.class);
@@ -57,6 +59,26 @@ public class SyspropMasterController {
 
         try{
             responseGlobalModel = geodataHelper.getGeodata(request);
+        }catch (Exception e){
+            Map<String, Object> errorBody = new HashMap<>();
+            errorBody.put("resultCode", 500);
+            errorBody.put("timestamp", serviceTool.generateTimestamp());
+            errorBody.put("message", "Internal Server Error");
+            Map<String, String> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            errorBody.put("error", error);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody);
+        }
+
+        return ResponseEntity.status(HttpStatus.OK).body(responseGlobalModel);
+    }
+
+    @PostMapping("/sendemail/error")
+    public ResponseEntity<Object> callGeodataMaster(@RequestBody ErrorReportRequestModel request) {
+        ResponseGlobalModel<Object> responseGlobalModel;
+
+        try{
+            responseGlobalModel = service.doProcessSendMailError(request);
         }catch (Exception e){
             Map<String, Object> errorBody = new HashMap<>();
             errorBody.put("resultCode", 500);

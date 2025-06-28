@@ -19,25 +19,43 @@ import java.util.List;
 @Mapper
 public interface BookingAccountMapper {
     BookingAccountMapper INSTANCE = Mappers.getMapper(BookingAccountMapper.class);
-    // Mapping BookingAccountModel ke UspBookingAccountParam
-    @Mapping(target = "insPlacing", source = "insPlacing", qualifiedByName = "mapInsPlacingToJson")
+
+
     @Mapping(target = "clientCode", source = "clientCode.code")
     @Mapping(target = "mktId", source = "mktId.code")
     @Mapping(target = "prevIns", source = "prevIns.code")
+    @Mapping(target = "effDate", source = "effDate")
     UspBookingAccountParam toUspBookingAccountParam(BookingAccountModel model);
+
+
+
+    @Mapping(target = "bookCd", source = "bookCd")
+    @Mapping(target = "revDoc", source = "model.bookRev")
+    @Mapping(target = "descriptionDtl", source = "model.descriptionDtl")
+    @Mapping(target = "premiumBudget", source = "model.premiumBudget")
+    @Mapping(target = "totMembers", source = "model.totMembers")
+    @Mapping(target = "ip", source = "model.ip")
+    @Mapping(target = "op", source = "model.op")
+    @Mapping(target = "dt", source = "model.dt")
+    @Mapping(target = "mt", source = "model.mt")
+    @Mapping(target = "gl", source = "model.gl")
+    @Mapping(target = "createdBy", source = "createdBy")
+    @Mapping(target = "actionType", expression = "java(docType.getActionType() != null && !docType.getActionType().isBlank() ? model.getActionType() : model.getActionType())")
+    @Mapping(target = "insPlacing", source = "model.insPlacing", qualifiedByName = "mapInsPlacingToJson")
+    @Mapping(target = "docTypes", source = "model.docTypes", qualifiedByName = "mapDocTypesToJson")
+    UspBookingAccountDtlParam toUspBookingAccountDtlParam(
+            String bookCd,
+            BookingAccountModel.DocType docType,
+            BookingAccountModel model,
+            String createdBy
+    );
 
     @Named("mapInsPlacingToJson")
     default String mapInsPlacingToJson(List<BookingAccountModel.InsPlacing> insPlacing) {
         return insPlacing != null ? new Gson().toJson(insPlacing) : null;
     }
-
-    // Mapping dari DocType ke UspBookingAccountDtlParam
-    @Mapping(target = "bookCd", source = "bookCd") // Set bookCd dari parent
-    @Mapping(target = "revDoc", source = "docType.revDoc")
-    @Mapping(target = "description", source = "docType.descp")
-    @Mapping(target = "docType", source = "docType.code")
-    @Mapping(target = "pathDoc", source = "docType.urlPath")
-    @Mapping(target = "createdBy", source = "createdBy")
-    @Mapping(target = "actionType", source = "actionType")
-    UspBookingAccountDtlParam toUspBookingAccountDtlParam(String bookCd, BookingAccountModel.DocType docType,String createdBy,String actionType);
+    @Named("mapDocTypesToJson")
+    default String mapDocTypesToJson(List<BookingAccountModel.DocType> docTypes) {
+        return docTypes != null ? new Gson().toJson(docTypes) : "[]";
+    }
 }
