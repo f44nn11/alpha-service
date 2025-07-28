@@ -30,7 +30,8 @@ public interface BookingAccountMapper {
 
 
     @Mapping(target = "bookCd", source = "bookCd")
-    @Mapping(target = "revDoc", source = "model.bookRev")
+    @Mapping(target = "revDoc",
+            expression = "java(model.getBookRev() != null ? model.getBookRev() : docType.getRevDoc())")
     @Mapping(target = "descriptionDtl", source = "model.descriptionDtl")
     @Mapping(target = "premiumBudget", source = "model.premiumBudget")
     @Mapping(target = "totMembers", source = "model.totMembers")

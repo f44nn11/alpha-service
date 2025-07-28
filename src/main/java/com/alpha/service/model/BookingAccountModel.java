@@ -49,6 +49,7 @@ public class BookingAccountModel {
         private String descp;
         private String urlPath;
         private String actionType;
+        private boolean isNew;
     }
 
     @Data

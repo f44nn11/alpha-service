@@ -18,6 +18,8 @@ import com.alpha.service.util.DataUtil;
 import com.alpha.service.util.ServiceTool;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import jakarta.persistence.ParameterMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -156,7 +158,8 @@ public class PlacingAccountSIUDService {
             int resultCode = (Integer) procedureResult.get("p_resultCode");
             String message = (String) procedureResult.get("p_message");
             String resultJson = (String) procedureResult.get("p_resultJson");
-
+            logger.info("resultCode===>", resultCode );
+            logger.info("resultJson===>", resultJson );
             responseGlobalModel.setResultCode(resultCode);
             responseGlobalModel.setMessage(message);
 
@@ -248,7 +251,7 @@ public class PlacingAccountSIUDService {
                         mailType = "PLREV";
                     }
 
-                    if (!placingAccountModel.getInsurances().isEmpty()){
+                    if (!placingAccountModel.getInsurances().isEmpty()) {
                         for (PlacingRequestModel.Insurance insurance : placingAccountModel.getInsurances()) {
 
                             String insCd = String.valueOf(insurance.getInsCd());
@@ -636,6 +639,7 @@ public class PlacingAccountSIUDService {
             String maxRev = String.valueOf(revMap.get("maxRev"));
             String baseFolder = dataUtil.getPathUpload();
 
+            System.out.println("baseFolder===>" + baseFolder);
 
             for (PlacingConfirmRequestParam.InsuranceItem insurance : uspParam.getInsurances()) {
                 // Set file path & update doc url
@@ -655,7 +659,7 @@ public class PlacingAccountSIUDService {
                             MultipartFile file = files.get(fileKey);
                             if (file != null && !file.isEmpty()) {
                                 String docFolder = doc.getDescp();
-                                String urlPath = serviceTool.saveFile(file, baseFolder, bookCd, maxRev, placingCd, String.valueOf(nextRevDoc), docFolder, "proposal");
+                                String urlPath = serviceTool.saveFileWithBase(file, baseFolder, bookCd, maxRev, placingCd, String.valueOf(nextRevDoc), docFolder, "proposal");
 
                                 // Update urlPath
                                 doc.setUrlPath(urlPath);
@@ -738,6 +742,7 @@ public class PlacingAccountSIUDService {
                 .create();
         try {
             ComparationRequestModel uspParam = gson.fromJson(data, ComparationRequestModel.class);
+            logger.info("uspParam===> {}", new Gson().toJson(uspParam));
             String comparationCd = uspParam.getComparationCd();
             String revDoc = uspParam.getRevDoc();
             List<ComparationRequestModel.ComparationModel> revisions = uspParam.getComparations();
@@ -764,7 +769,7 @@ public class PlacingAccountSIUDService {
 
             String placingCd = uspParam.getPlacingCd();
             String bookCd = uspParam.getBookCd();
-            String actionType = uspParam.getActionType();
+            String actionType = uspParam.getActionType().equalsIgnoreCase("4") ? "2" : uspParam.getActionType(); // 4 = Comparation Upadte
 
             String urlPath = null;
             String baseFolder = dataUtil.getPathUpload();
@@ -783,7 +788,7 @@ public class PlacingAccountSIUDService {
                     .collect(Collectors.toList());
 
             String docListJson = gson.toJson(docList);
-
+            logger.info("baseFolder====>" + baseFolder);
             if (files != null && !files.isEmpty()) {
                 for (Map.Entry<String, MultipartFile> entry : files.entrySet()) {
                     String docType = entry.getKey(); // ini adalah docType (misal: "8")
@@ -791,7 +796,7 @@ public class PlacingAccountSIUDService {
 
                     if (file != null && !file.isEmpty()) {
                         String docFolder = "comparation";
-                        String relativePath = serviceTool.saveFile(
+                        String relativePath = serviceTool.saveFileWithBase(
                                 file,
                                 baseFolder,
                                 bookCd,
@@ -809,41 +814,83 @@ public class PlacingAccountSIUDService {
                 }
             }
 
+            logger.info("relativePath===>" + urlPath);
 
-            List<ProcedureParamModel> procParams = List.of(
-                    new ProcedureParamModel("p_comparationCd", comparationCd, String.class, ParameterMode.IN),
-                    new ProcedureParamModel("p_placingCd", placingCd, String.class, ParameterMode.IN),
-                    new ProcedureParamModel("p_urlPath", urlPath, String.class, ParameterMode.IN),
-                    new ProcedureParamModel("p_description", description, String.class, ParameterMode.IN),
-                    new ProcedureParamModel("p_emailRemark", emailRemark, String.class, ParameterMode.IN),
-                    new ProcedureParamModel("p_rev", revDoc, String.class, ParameterMode.IN),
-                    new ProcedureParamModel("p_docListJson", docListJson, String.class, ParameterMode.IN),
-                    new ProcedureParamModel("p_user", user, String.class, ParameterMode.IN),
-                    new ProcedureParamModel("p_actionType", actionType, String.class, ParameterMode.IN),
-                    new ProcedureParamModel("p_resultCode", null, Integer.class, ParameterMode.OUT),
-                    new ProcedureParamModel("p_message", null, String.class, ParameterMode.OUT),
-                    new ProcedureParamModel("p_resultJson", null, String.class, ParameterMode.OUT)
-            );
+            for (ComparationRequestModel.ComparationModel comparationModel : uspParam.getComparations()) {
+                if (urlPath != null && !urlPath.isBlank()) {
+                    comparationModel.setUrlPath(urlPath);
+                }
+                comparationCd = comparationModel.getComparationCd();
+                if (comparationCd == null || comparationCd.isBlank()) {
+                    comparationCd = uspParam.getComparationCd();
+                }
+                description = comparationModel.getDescription();
+                if (description == null || description.isBlank()) {
+                    description = uspParam.getDescription();
+                }
+                emailRemark = comparationModel.getEmailRemark();
+                if (emailRemark == null || emailRemark.isBlank()) {
+                    emailRemark = uspParam.getEmailRemark();
+                }
+                if (urlPath == null || urlPath.isBlank()) {
+                    urlPath = comparationModel.getUrlPath();
+                }
+                List<ProcedureParamModel> procParams = List.of(
+                        new ProcedureParamModel("p_comparationCd", comparationCd, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_placingCd", placingCd, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_urlPath", urlPath, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_description", description, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_emailRemark", emailRemark, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_rev", revDoc, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_docListJson", docListJson, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_user", user, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_actionType", actionType, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_resultCode", null, Integer.class, ParameterMode.OUT),
+                        new ProcedureParamModel("p_message", null, String.class, ParameterMode.OUT),
+                        new ProcedureParamModel("p_resultJson", null, String.class, ParameterMode.OUT)
+                );
 
+                Map<String, Object> result = repository.callPlacingProcedure("USP_COMPARATION", procParams);
+                String resultJson = (String) result.get("p_resultJson");
+                JsonObject obj = JsonParser.parseString(resultJson).getAsJsonObject();
+                comparationCd = obj.get("comparationCd").getAsString();
 
-            Map<String, Object> result = repository.callPlacingProcedure("USP_COMPARATION", procParams);
-            int resultCode = (Integer) result.get("p_resultCode");
+                Map<String, Object> resultDtl = new HashMap<>();
+                int resultCode = (Integer) result.get("p_resultCode");
 
-            if (resultCode != 200) {
-                responseGlobalModel.setResultCode(resultCode);
-                responseGlobalModel.setMessage((String) result.get("p_message"));
-                responseGlobalModel.setError(Collections.singletonMap("error", String.valueOf(result.get("p_resultJson"))));
-                logger.error("❌ Failed insert comparation: {}", responseGlobalModel);
+                if (resultCode != 200) {
+                    responseGlobalModel.setResultCode(resultCode);
+                    responseGlobalModel.setMessage((String) result.get("p_message"));
+                    responseGlobalModel.setError(Collections.singletonMap("error", String.valueOf(result.get("p_resultJson"))));
+                    logger.error("❌ Failed insert comparation: {}", responseGlobalModel);
 
-                return responseGlobalModel;
+                    return responseGlobalModel;
+                } else {
+                    List<ProcedureParamModel> procParamsDetail = List.of(
+                            new ProcedureParamModel("p_comparationCd", comparationCd, String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_placingCd", placingCd, String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_urlPath", urlPath, String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_description", description, String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_emailRemark", emailRemark, String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_rev", revDoc, String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_docListJson", docListJson, String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_user", user, String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_actionType", "3", String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_resultCode", null, Integer.class, ParameterMode.OUT),
+                            new ProcedureParamModel("p_message", null, String.class, ParameterMode.OUT),
+                            new ProcedureParamModel("p_resultJson", null, String.class, ParameterMode.OUT)
+                    );
+                    resultDtl = repository.callPlacingProcedure("USP_COMPARATION", procParamsDetail);
+                    resultCode = (Integer) resultDtl.get("p_resultCode");
+                    if (resultCode == 200) {
+                        responseGlobalModel = doProcessSendComparation(gson.toJson(uspParam));
+                    }
+                }
+                Map<String, Object> responseData = gson.fromJson((String) resultDtl.get("p_resultJson"), Map.class);
+                responseGlobalModel.setResultCode(200);
+                responseGlobalModel.setMessage("Comparation success");
+                responseGlobalModel.setData(responseData);
             }
-
-
-            Map<String, Object> responseData = gson.fromJson((String) result.get("p_resultJson"), Map.class);
-            responseGlobalModel.setResultCode(200);
-            responseGlobalModel.setMessage("Comparation success");
-            responseGlobalModel.setData(responseData);
-
         } catch (Exception e) {
             logger.error("❌ Error processing placing confirm: ", e);
             responseGlobalModel.setResultCode(500);
@@ -866,12 +913,18 @@ public class PlacingAccountSIUDService {
 
             String placingCd = proposalRevision.getPlacingCd();
             String bookCd = proposalRevision.getBookCd();
+            String revHeader = proposalRevision.getRev();
 
             for (PlacingRequestModel.Insurance insurance : proposalRevision.getInsurances()) {
                 // Set file path & update doc url
                 String insCd = String.valueOf(insurance.getInsCd());
                 String actionType = proposalRevision.getActionType();
-                String revDoc = String.valueOf(insurance.getDocTypes().get(0).getRevDoc());
+                String revDoc = insurance.getDocTypes() != null && !insurance.getDocTypes().isEmpty()
+                        ? String.valueOf(insurance.getDocTypes().get(0).getRevDoc())
+                        : null;
+
+                String pRev = (revHeader != null && !revHeader.isEmpty()) ? revHeader : (revDoc != null ? revDoc : "");
+
 
                 List<PlacingRequestModel.DocType> docTypes = insurance.getDocTypes();
                 String docJson = gson.toJson(docTypes);
@@ -881,6 +934,12 @@ public class PlacingAccountSIUDService {
                 if (proposalDtStr != null && !proposalDtStr.isEmpty()) {
                     proposalDt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(proposalDtStr);
                 }
+                String proposalDtDtlStr = insurance.getPlacingDate();
+                Date proposalDtDtl = null;
+                if (proposalDtDtlStr != null && !proposalDtDtlStr.isEmpty()) {
+                    proposalDtDtl = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(proposalDtDtlStr);
+                }
+
 
                 List<ProcedureParamModel> procParams = List.of(
                         new ProcedureParamModel("p_placingCd", placingCd, String.class, ParameterMode.IN),
@@ -890,17 +949,19 @@ public class PlacingAccountSIUDService {
                         new ProcedureParamModel("p_user", proposalRevision.getCreatedBy(), String.class, ParameterMode.IN),
                         new ProcedureParamModel("p_insCd", insurance.getInsCd(), Long.class, ParameterMode.IN),
                         new ProcedureParamModel("p_description", proposalRevision.getDescription() == null ? "" : proposalRevision.getDescription(), String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_descriptionDtl", insurance.getDescriptionDtl() == null ? "" : insurance.getDescriptionDtl(), String.class, ParameterMode.IN),
                         new ProcedureParamModel("p_proposalDt", proposalDt, Date.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_proposalDtDtl", proposalDtDtl, Date.class, ParameterMode.IN),
                         new ProcedureParamModel("p_premiumTot", 0, BigDecimal.class, ParameterMode.IN),
                         new ProcedureParamModel("p_compct", 0, BigDecimal.class, ParameterMode.IN),
                         new ProcedureParamModel("p_docListJson", docJson, String.class, ParameterMode.IN),
-                        new ProcedureParamModel("p_rev", revDoc, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_rev", pRev, String.class, ParameterMode.IN),
                         new ProcedureParamModel("p_resultCode", null, Integer.class, ParameterMode.OUT),
                         new ProcedureParamModel("p_message", null, String.class, ParameterMode.OUT),
                         new ProcedureParamModel("p_resultJson", null, String.class, ParameterMode.OUT)
                 );
 
-//                logger.info("procParams====> {}", procParams);
+                logger.info("procParams====> {}", procParams);
 
                 Map<String, Object> result = repository.callPlacingProcedure("USP_PROPOSAL_REQUEST", procParams);
                 int resultCode = (Integer) result.get("p_resultCode");
@@ -979,7 +1040,7 @@ public class PlacingAccountSIUDService {
                     System.out.println("description: " + description);
                     System.out.println("emailRemark: " + emailRemark);
                     System.out.println("fileName: " + fileName);
-                    System.out.println("urlPath: " + urlPath);
+                    System.out.println("urlPath===>: " + urlPath);
                     System.out.println("sendDate: " + sendDate);
                     System.out.println("insurances: " + insurances);
                     System.out.println("rev: " + rev);
@@ -1006,7 +1067,7 @@ public class PlacingAccountSIUDService {
                     logger.info("insuranceList==>" + insuranceList);
 
                     String mailType = "";
-                    if (actionType.equalsIgnoreCase("1")) {
+                    if (actionType.equalsIgnoreCase("1") || actionType.equalsIgnoreCase("4")) {
                         mailType = "PLCP";
                         emailRequestModel.setActionType("3");
                     } else if (actionType.equalsIgnoreCase("2")) {
@@ -1027,21 +1088,10 @@ public class PlacingAccountSIUDService {
                                 serviceTool.getProperty("email.service.url") + "/email/send"
                         );
                         logger.info("responseData===>" + new Gson().toJson(responseEmailGlobalModel));
-//                        Map<String, Object> resultMap = new Gson().fromJson(responseData, Map.class);
-
-//                        Object resultCodeObj = resultMap.get("resultCode");
-//                        int resultCodeInt = resultCodeObj instanceof Number ? ((Number) resultCodeObj).intValue() : Integer.parseInt(resultCodeObj.toString());
-                        if (responseEmailGlobalModel.getResultCode() == 200) {
-                            uspParam.setActionType("3");
-                            doProcessInsComparation(null, new Gson().toJson(uspParam));
-                        } else {
-                            logger.warn("Email gagal dikirim: " + responseEmailGlobalModel.getMessage());
-                        }
-
                     } else {
                         responseEmailGlobalModel = emailService.sendEmailWithAttachments(
                                 new Gson().toJson(emailRequestModel),
-                                Collections.emptyList(),
+                                serviceTool.convertUrlsToMultipartFiles(Collections.singletonList(urlPath)),
                                 serviceTool.getProperty("email.service.url") + "/email/send"
                         );
                     }
@@ -1058,7 +1108,6 @@ public class PlacingAccountSIUDService {
             responseGlobalModel.setResultCode(500);
             responseGlobalModel.setMessage("Internal Server Error: " + e.getMessage());
         }
-
         return responseGlobalModel;
     }
 }

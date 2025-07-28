@@ -1,6 +1,7 @@
 package com.alpha.service.controller;
 
 
+import com.alpha.service.entity.LogEmailApp;
 import com.alpha.service.model.EmailCheckModel;
 import com.alpha.service.model.placing.PlacingRequestModel;
 import com.alpha.service.model.procedure.PlacingConfirmRequestParam;
@@ -8,7 +9,10 @@ import com.alpha.service.model.procedure.UspComparationParam;
 import com.alpha.service.model.procedure.UspPlacingParam;
 import com.alpha.service.model.procedure.UspProposalParam;
 import com.alpha.service.model.response.ResponseGlobalModel;
+import com.alpha.service.model.sendemail.EmailRequestModel;
 import com.alpha.service.service.PlacingAccountSIUDService;
+import com.alpha.service.service.sendemail.EmailService;
+import com.alpha.service.service.sendemail.LogEmailAppService;
 import com.alpha.service.util.DataUtil;
 import com.alpha.service.util.ServiceTool;
 import com.google.gson.Gson;
@@ -22,6 +26,9 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -42,6 +49,10 @@ public class PlacingController {
     private ServiceTool serviceTool;
     @Autowired
     private DataUtil dataUtil;
+    @Autowired
+    private LogEmailAppService logEmailAppService;
+    @Autowired
+    private EmailService emailService;
 
     @PostMapping("/doplacing")
     public ResponseEntity<ResponseGlobalModel<Object>> doPlacingBooking(@RequestBody UspPlacingParam placingRequest) {
@@ -127,17 +138,18 @@ public class PlacingController {
         }
     }
 
-    @PostMapping("/proposal/revision")
-    public ResponseEntity<ResponseGlobalModel<Object>> doProposalRevision(
-            @RequestParam(value = "data") String data,
-            @RequestParam(value = "globalFiles[]", required = false) List<MultipartFile> globalFiles,
-            @RequestParam Map<String, MultipartFile> files
+    @PostMapping("/proposal/revision/v2")
+    public ResponseEntity<ResponseGlobalModel<Object>> doProposalRevisionV2(
+            @RequestBody String data
     ) {
 
         Gson gson = new GsonBuilder()
                 .setDateFormat("yyyy-MM-dd HH:mm:ss")
                 .setPrettyPrinting()
                 .create();
+        List<Map<String, Object>> emailResults = new ArrayList<>();
+        ResponseGlobalModel<Object> responseGlobalModel = new ResponseGlobalModel<>();
+
         try {
             logger.info("Received proposal revision: {}", data);
 
@@ -151,68 +163,278 @@ public class PlacingController {
             String bookCd = proposalRevision.getBookCd();
             String placingCd = proposalRevision.getPlacingCd();
 
-            for (PlacingRequestModel.Insurance insurance : proposalRevision.getInsurances()) {
-                List<PlacingRequestModel.DocType> docTypes = insurance.getDocTypes();
-                // Set file path & update doc url
-                String insCd = String.valueOf(insurance.getInsCd());
-                String actionType = proposalRevision.getActionType();
-                String revDoc = String.valueOf(insurance.getDocTypes().get(0).getRevDoc());
 
-                String targetPath = baseFolder + "/" + bookCd + "/rev" + revDoc + "/" + placingCd;
+            ResponseGlobalModel<Object> procedureResult = placingAccountService.doProcessInsProposalRevision(proposalRevision);
 
+            if (procedureResult.getResultCode() == 200) {
+                responseGlobalModel.setResultCode(procedureResult.getResultCode());
+                responseGlobalModel.setMessage(procedureResult.getMessage());
+                String mailType = "";
+                if (proposalRevision.getActionType().equalsIgnoreCase("1")) {
+                    mailType = "PRNEW";
+                } else if (proposalRevision.getActionType().equalsIgnoreCase("2")) {
+                    mailType = "PRNEW";
+                }
+                if (proposalRevision.getInsurances() != null && !proposalRevision.getInsurances().isEmpty()) {
+                    for (PlacingRequestModel.Insurance insurance : proposalRevision.getInsurances()) {
+                        List<PlacingRequestModel.DocType> docTypes = insurance.getDocTypes();
+                        // Set file path & update doc url
+                        String insCd = String.valueOf(insurance.getInsCd());
+                        String actionType = proposalRevision.getActionType();
+                        String revDoc = String.valueOf(insurance.getDocTypes().get(0).getRevDoc());
 
-                for (PlacingRequestModel.DocType doc : docTypes) {
-                    String fileKey;
-                    int globalIdx = 0;
-                    if (doc.isGlobal()) {
-                        if (globalFiles != null && globalFiles.size() > globalIdx) {
-                            MultipartFile globalFile = globalFiles.get(globalIdx++);
-                            String docFolder = "other";
-                            String urlPath = serviceTool.saveFile(globalFile, baseFolder, bookCd, revDoc, placingCd, String.valueOf(revDoc), docFolder, "proposalRevision");
-                            doc.setUrlPath(urlPath);
-                        }
-                    } else if (doc.isPerInsurance()) {
-                        fileKey = "insuranceFiles[" + insurance.getInsCd() + "][]";
+                        String targetPath = baseFolder + "/" + bookCd + "/rev" + revDoc + "/" + placingCd;
 
-                        logger.info("🔍Checking perInsurance fileKey: {}", fileKey);
-                        if (files != null && !files.isEmpty()) {
-                            MultipartFile file = files.get(fileKey);
-                            if (file != null && !file.isEmpty()) {
-                                String docFolder = "other";
-                                String urlPath = serviceTool.saveFile(file, baseFolder, bookCd, revDoc, placingCd, String.valueOf(revDoc), docFolder, "proposalRevision");
+                        List<String> attachmentUrls = new ArrayList<>();
 
-                                // Update urlPath
-                                doc.setUrlPath(urlPath);
+                        for (PlacingRequestModel.DocType doc : docTypes) {
+                            String urlPath = doc.getUrlPath();
+                            if (urlPath != null && !urlPath.isEmpty()) {
+                                attachmentUrls.add(urlPath);
                             }
-
                         }
-                    } else {
-                        fileKey = insCd + "-" + doc.getCode();
+
+                        EmailRequestModel emailRequestModel = new EmailRequestModel();
+                        emailRequestModel.setMailType(mailType);
+                        emailRequestModel.setCode(placingCd);
+                        emailRequestModel.setBookCd(bookCd);
+                        emailRequestModel.setActionType("2");
+                        emailRequestModel.setCreatedBy(proposalRevision.getCreatedBy() == null ? "System" : proposalRevision.getCreatedBy());
+
+                        Map<String, Object> templateData = new HashMap<>();
+                        templateData.put("mailType", mailType);
+                        templateData.put("actionType", "2");
+                        templateData.put("placingCd", placingCd);
+                        templateData.put("bookCd", bookCd);
+                        templateData.put("code", placingCd);
+                        templateData.put("insCd", insCd);
+                        emailRequestModel.setParamTemplate(templateData);
+                        System.out.println("emailRequestModel==0>" + new Gson().toJson(emailRequestModel));
+//                        ResponseGlobalModel<Object> emailResult = emailService.sendEmailWithAttachments(
+//                                new Gson().toJson(emailRequestModel),
+//                                serviceTool.convertUrlsToMultipartFiles(attachmentUrls),
+//                                serviceTool.getProperty("email.service.url") + "/email/send"
+//                        );
+
+
+                        //insert Log Email
+                        LogEmailApp log = new LogEmailApp();
+                        log.setRefType("PROPOSAL REVISION");
+                        log.setRefId(placingCd);
+                        log.setRefSubId(insCd);
+                        log.setMailType(mailType);
+                        log.setSubject(emailRequestModel.getSubject());
+                        log.setMailTo("");
+                        log.setAttachmentInfo(new Gson().toJson(attachmentUrls));
+                        log.setStatus("PROCESSING");
+                        log.setRequestDt(LocalDateTime.now());
+                        log.setCreateBy(emailRequestModel.getCreatedBy());
+                        LogEmailApp savedLog = logEmailAppService.createLog(log);
+                        Long logId = savedLog.getId();
+
+                        emailService.sendEmailWithAttachmentsAsync(
+                                emailRequestModel,
+                                serviceTool.convertUrlsToMultipartFiles(attachmentUrls),
+                                serviceTool.getProperty("email.service.url") + "/email/send",
+                                insCd,
+                                logId
+                        );
+
+                        Map<String, Object> emailResultMap = new HashMap<>();
+                        emailResultMap.put("insCd", insCd);
+                        emailResultMap.put("resultCode", 200);
+                        emailResultMap.put("message", "PROCESSING");
+                        emailResults.add(emailResultMap);
+
+                        String docJson = "";
+                        if (actionType.equalsIgnoreCase("1")) {
+                            docJson = gson.toJson(insurance.getDocTypes());
+                        } else {
+                            docJson = gson.toJson(insurance.getDocTypes());
+                        }
+
+
+                        logger.info("dataJson====> {}", docJson);
+
                     }
                 }
 
+                logger.info("Placing IUD successful: placingCd={}, bookCd={}, insurances={}, emailResults={}",
+                        placingCd, bookCd, proposalRevision.getInsurances(), emailResults);
 
-                String docJson = "";
-                if (actionType.equalsIgnoreCase("1")) {
-                    docJson = gson.toJson(insurance.getDocTypes());
-                } else {
-                    if (files != null && !files.isEmpty()) {
-                        docJson = gson.toJson(insurance.getDocTypes());
-                    }
-                }
-
-
-                logger.info("dataJson====> {}", docJson);
-
-            }
-
-            logger.info("proposalRevision====>" + gson.toJson(proposalRevision));
-            ResponseGlobalModel<Object> response = placingAccountService.doProcessInsProposalRevision(proposalRevision);
-
-            if (response.getResultCode() == 200) {
-                return ResponseEntity.ok(response);
+                logger.info("proposalRevision====>" + gson.toJson(proposalRevision));
+                return ResponseEntity.ok(responseGlobalModel);
             } else {
-                return ResponseEntity.status(400).body(response);
+                return ResponseEntity.status(400).body(responseGlobalModel);
+            }
+        } catch (Exception e) {
+            logger.error("Error processing placing: ", e);
+            ResponseGlobalModel<Object> errorResponse = new ResponseGlobalModel<>();
+            errorResponse.setResultCode(500);
+            errorResponse.setMessage("Internal Server Error: " + e.getMessage());
+            return ResponseEntity.status(500).body(errorResponse);
+        }
+    }
+
+    @PostMapping("/proposal/revision")
+    public ResponseEntity<ResponseGlobalModel<Object>> doProposalRevision(
+            @RequestParam(value = "data") String data,
+            @RequestParam(value = "globalFiles[]", required = false) List<MultipartFile> globalFiles,
+            @RequestParam Map<String, MultipartFile> files
+    ) {
+
+        Gson gson = new GsonBuilder()
+                .setDateFormat("yyyy-MM-dd HH:mm:ss")
+                .setPrettyPrinting()
+                .create();
+        List<Map<String, Object>> emailResults = new ArrayList<>();
+        ResponseGlobalModel<Object> responseGlobalModel = new ResponseGlobalModel<>();
+
+        try {
+            logger.info("Received proposal revision: {}", data);
+
+            PlacingRequestModel proposalRevision = new GsonBuilder()
+                    .setDateFormat("yyyy-MM-dd HH:mm:ss")
+                    .setPrettyPrinting()
+                    .create()
+                    .fromJson(data, PlacingRequestModel.class);
+
+            String baseFolder = dataUtil.getPathUpload();
+            String bookCd = proposalRevision.getBookCd();
+            String placingCd = proposalRevision.getPlacingCd();
+
+
+            ResponseGlobalModel<Object> procedureResult = placingAccountService.doProcessInsProposalRevision(proposalRevision);
+
+            if (procedureResult.getResultCode() == 200) {
+                responseGlobalModel.setResultCode(procedureResult.getResultCode());
+                responseGlobalModel.setMessage(procedureResult.getMessage());
+                String mailType = "";
+                if (proposalRevision.getActionType().equalsIgnoreCase("1")) {
+                    mailType = "PRNEW";
+                } else if (proposalRevision.getActionType().equalsIgnoreCase("2")) {
+                    mailType = "PRNEW";
+                }
+                if (proposalRevision.getInsurances() != null && !proposalRevision.getInsurances().isEmpty()) {
+                    for (PlacingRequestModel.Insurance insurance : proposalRevision.getInsurances()) {
+                        List<PlacingRequestModel.DocType> docTypes = insurance.getDocTypes();
+                        // Set file path & update doc url
+                        String insCd = String.valueOf(insurance.getInsCd());
+                        String actionType = proposalRevision.getActionType();
+                        String revDoc = String.valueOf(insurance.getDocTypes().get(0).getRevDoc());
+
+                        String targetPath = baseFolder + "/" + bookCd + "/rev" + revDoc + "/" + placingCd;
+
+                        List<String> attachmentUrls = new ArrayList<>();
+                        for (PlacingRequestModel.DocType doc : docTypes) {
+                            String fileKey;
+                            int globalIdx = 0;
+                            if (doc.isGlobal()) {
+                                if (globalFiles != null && globalFiles.size() > globalIdx) {
+                                    MultipartFile globalFile = globalFiles.get(globalIdx++);
+                                    String docFolder = "other";
+                                    String urlPath = serviceTool.saveFile(globalFile, baseFolder, bookCd, revDoc, placingCd, String.valueOf(revDoc), docFolder, "proposalRevision");
+                                    doc.setUrlPath(urlPath);
+                                    attachmentUrls.add(urlPath);
+                                }
+                            } else if (doc.isPerInsurance()) {
+                                fileKey = "insuranceFiles[" + insurance.getInsCd() + "][]";
+
+                                logger.info("🔍Checking perInsurance fileKey: {}", fileKey);
+                                if (files != null && !files.isEmpty()) {
+                                    MultipartFile file = files.get(fileKey);
+                                    if (file != null && !file.isEmpty()) {
+                                        String docFolder = "other";
+                                        String urlPath = serviceTool.saveFile(file, baseFolder, bookCd, revDoc, placingCd, String.valueOf(revDoc), docFolder, "proposalRevision");
+
+                                        // Update urlPath
+                                        doc.setUrlPath(urlPath);
+                                        attachmentUrls.add(urlPath);
+                                    }
+
+                                }
+                            } else {
+                                fileKey = insCd + "-" + doc.getCode();
+                                String urlPath = doc.getUrlPath();
+                                if (urlPath != null && !urlPath.isEmpty()) {
+                                    attachmentUrls.add(urlPath);
+                                }
+                            }
+                        }
+
+                        EmailRequestModel emailRequestModel = new EmailRequestModel();
+                        emailRequestModel.setMailType(mailType);
+                        emailRequestModel.setCode(placingCd);
+                        emailRequestModel.setBookCd(bookCd);
+                        emailRequestModel.setActionType("2");
+                        emailRequestModel.setCreatedBy(proposalRevision.getCreatedBy() == null ? "System" : proposalRevision.getCreatedBy());
+
+                        Map<String, Object> templateData = new HashMap<>();
+                        templateData.put("mailType", mailType);
+                        templateData.put("actionType", "2");
+                        templateData.put("placingCd", placingCd);
+                        templateData.put("bookCd", bookCd);
+                        templateData.put("code", placingCd);
+                        templateData.put("insCd", insCd);
+                        emailRequestModel.setParamTemplate(templateData);
+                        System.out.println("emailRequestModel==0>" + new Gson().toJson(emailRequestModel));
+//                        ResponseGlobalModel<Object> emailResult = emailService.sendEmailWithAttachments(
+//                                new Gson().toJson(emailRequestModel),
+//                                serviceTool.convertUrlsToMultipartFiles(attachmentUrls),
+//                                serviceTool.getProperty("email.service.url") + "/email/send"
+//                        );
+
+                        //insert Log Email
+                        LogEmailApp log = new LogEmailApp();
+                        log.setRefType("PROPOSAL REVISION");
+                        log.setRefId(placingCd);
+                        log.setRefSubId(insCd);
+                        log.setMailType(mailType);
+                        log.setSubject(emailRequestModel.getSubject());
+                        log.setMailTo("");
+                        log.setAttachmentInfo(new Gson().toJson(attachmentUrls));
+                        log.setStatus("PROCESSING");
+                        log.setRequestDt(LocalDateTime.now());
+                        log.setCreateBy(emailRequestModel.getCreatedBy());
+                        LogEmailApp savedLog = logEmailAppService.createLog(log);
+                        Long logId = savedLog.getId();
+
+                        emailService.sendEmailWithAttachmentsAsync(
+                                emailRequestModel,
+                                serviceTool.convertUrlsToMultipartFiles(attachmentUrls),
+                                serviceTool.getProperty("email.service.url") + "/email/send",
+                                insCd,
+                                logId
+                        );
+
+                        Map<String, Object> emailResultMap = new HashMap<>();
+                        emailResultMap.put("insCd", insCd);
+                        emailResultMap.put("resultCode", 200);
+                        emailResultMap.put("message", "PROCESSING");
+                        emailResults.add(emailResultMap);
+
+                        String docJson = "";
+                        if (actionType.equalsIgnoreCase("1")) {
+                            docJson = gson.toJson(insurance.getDocTypes());
+                        } else {
+                            if (files != null && !files.isEmpty()) {
+                                docJson = gson.toJson(insurance.getDocTypes());
+                            }
+                        }
+
+
+                        logger.info("dataJson====> {}", docJson);
+
+                    }
+                }
+
+                logger.info("Placing IUD successful: placingCd={}, bookCd={}, insurances={}, emailResults={}",
+                        placingCd, bookCd, proposalRevision.getInsurances(), emailResults);
+
+                logger.info("proposalRevision====>" + gson.toJson(proposalRevision));
+                return ResponseEntity.ok(responseGlobalModel);
+            } else {
+                return ResponseEntity.status(400).body(responseGlobalModel);
             }
         } catch (Exception e) {
             logger.error("Error processing placing: ", e);

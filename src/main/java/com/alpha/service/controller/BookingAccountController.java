@@ -5,6 +5,7 @@ import com.alpha.service.exception.CustomException;
 import com.alpha.service.helper.BookingAccountHelper;
 import com.alpha.service.model.BookingAccountModel;
 import com.alpha.service.model.BookingReviewModel;
+import com.alpha.service.model.placing.PlacingRequestModel;
 import com.alpha.service.model.procedure.UspBookingAccountGetParam;
 import com.alpha.service.model.response.ResponseGlobalModel;
 import com.alpha.service.model.sendemail.EmailRequestModel;
@@ -622,8 +623,22 @@ public class BookingAccountController {
 
                         responseGlobalModel = helper.doProcessBookingIUD(bookingDetailModel, bookCd, "2");
                     }
+                    List<String> attachmentUrls = new ArrayList<>();
+
+                    for (BookingAccountModel.DocType docType : bookingAccountModel.getDocTypes()) {
+                        String urlPath = docType.getUrlPath();
+                        if (urlPath != null && !urlPath.isEmpty()) {
+                            if (!docType.isNew()) {
+                                attachmentUrls.add(urlPath);
+                            }
+                        }
+                    }
+                    List<MultipartFile> urlFiles = serviceTool.convertUrlsToMultipartFiles(attachmentUrls);
+                    attachments.addAll(urlFiles);
                 }
             }
+
+
 
             if (responseGlobalModel.getResultCode() == 200) {
                 if (bookingAccountModel.getActionType().equalsIgnoreCase("1")) {
@@ -632,11 +647,28 @@ public class BookingAccountController {
                     if (bookingAccountModel.getActionType().equalsIgnoreCase("1")) {
                         mailType = "BKNEW";
                     }
-//                    else if (bookingAccountModel.getActionType().equalsIgnoreCase("2")) {
-//                        mailType = "BKREV";
-//                    } else if (bookingAccountModel.getActionType().equalsIgnoreCase("4")) {
-//                        mailType = "BKREV";
-//                    }
+                    emailRequestModel.setMailType(mailType);
+                    emailRequestModel.setActionType("1");
+                    emailRequestModel.setBookCd(bookCd);
+                    emailRequestModel.setClientName(bookingAccountModel.getClientName());
+                    emailRequestModel.setCode(bookCd);
+                    emailRequestModel.setCreatedBy(bookingAccountModel.getCreatedBy() == null ? "System" : bookingAccountModel.getCreatedBy());
+                    bookingAccountModel.setBookCd(bookCd);
+                    templateData.put("bookCd", bookCd);
+                    ObjectMapper objectMapper = new ObjectMapper();
+                    Map<String, Object> paramTemplateMap = objectMapper.convertValue(bookingAccountModel, new TypeReference<Map<String, Object>>() {});
+                    emailRequestModel.setParamTemplate(paramTemplateMap);
+                    System.out.println("<==emailRequestModel==" + new Gson().toJson(emailRequestModel));
+                    emailService.sendEmailWithAttachments(
+                            new Gson().toJson(emailRequestModel),
+                            attachments, serviceTool.getProperty("email.service.url") + "/email/send"
+                    );
+                } else if (bookingAccountModel.getActionType().equalsIgnoreCase("4")) {
+                    EmailRequestModel emailRequestModel = new EmailRequestModel();
+                    String mailType = "";
+                    if (bookingAccountModel.getActionType().equalsIgnoreCase("4")) {
+                        mailType = "BKREV";
+                    }
                     emailRequestModel.setMailType(mailType);
                     emailRequestModel.setActionType("1");
                     emailRequestModel.setBookCd(bookCd);

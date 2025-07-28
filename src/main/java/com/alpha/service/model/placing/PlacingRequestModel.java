@@ -13,6 +13,7 @@ import java.util.List;
 public class PlacingRequestModel implements PlacingInterface {
     private String placingCd;
     private String bookCd;
+    private String rev;
     private String placingDate;
     private String description;
     private String createdBy;

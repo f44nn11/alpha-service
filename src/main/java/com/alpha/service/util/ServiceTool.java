@@ -128,6 +128,46 @@ public class ServiceTool {
         // Return relative path (tanpa base folder)
         return filePath.toString().replace(baseFolder + File.separator, "").replace("\\", "/");
     }
+
+    public String saveFileWithBase(MultipartFile file, String baseFolder, String bookCd, String maxRev, String placingCd, String revDoc, String docFolder, String typeFlag) throws IOException {
+        // Siapkan path direktori
+        Path savePath = Paths.get(baseFolder, bookCd, "rev" + maxRev, placingCd, docFolder);
+        Files.createDirectories(savePath);
+
+        // Ambil nama file
+        String originalFileName = Objects.requireNonNull(file.getOriginalFilename());
+        String extension = "";
+
+        int extIndex = originalFileName.lastIndexOf('.');
+        if (extIndex > 0) {
+            extension = originalFileName.substring(extIndex);
+        }
+
+        String timestamp = new java.text.SimpleDateFormat("yyyyMMddHHmmss").format(new java.util.Date());
+        String fileName;
+        if ("comparation".equalsIgnoreCase(typeFlag)) {
+            fileName = String.format("Comparation_%s_Rev%s_%s%s", bookCd, revDoc, timestamp, extension);
+        } else {
+            fileName = originalFileName;
+        }
+
+        Path filePath = savePath.resolve(fileName);
+
+        // Jika file sudah ada, hapus dulu (replace)
+        if (Files.exists(filePath)) {
+            Files.delete(filePath);
+            logger.info("✅ File already exists, deleted: {}", filePath);
+        }
+
+        // Simpan file
+        try (InputStream inDoc = file.getInputStream()) {
+            Files.copy(inDoc, filePath, StandardCopyOption.REPLACE_EXISTING);
+            logger.info("📁 File saved at: {}", filePath);
+        }
+
+        // Return relative path (dengan base folder)
+        return filePath.toString().replace("\\", "/");
+    }
     public String joinArray(List<String> arrays) {
         if (arrays == null || arrays.isEmpty()) {
             return "";
