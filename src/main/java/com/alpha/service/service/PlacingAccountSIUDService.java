@@ -940,7 +940,6 @@ public class PlacingAccountSIUDService {
                     proposalDtDtl = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(proposalDtDtlStr);
                 }
 
-
                 List<ProcedureParamModel> procParams = List.of(
                         new ProcedureParamModel("p_placingCd", placingCd, String.class, ParameterMode.IN),
                         new ProcedureParamModel("p_bookCd", bookCd, String.class, ParameterMode.IN),
@@ -1056,7 +1055,7 @@ public class PlacingAccountSIUDService {
                     templateData.put("actionType", uspParam.getActionType());
                     templateData.put("placingCd", placingCd);
                     templateData.put("bookCd", bookCd);
-                    templateData.put("code", placingCd);
+                    templateData.put("code", comparationCd);
                     templateData.put("insCd", "");
 
                     String insuranceList = comparations.stream()
@@ -1076,7 +1075,7 @@ public class PlacingAccountSIUDService {
                     }
 
                     emailRequestModel.setMailType(mailType);
-                    emailRequestModel.setCode(placingCd);
+                    emailRequestModel.setCode(comparationCd);
                     emailRequestModel.setBookCd(bookCd);
                     emailRequestModel.setCreatedBy(uspParam.getCreateBy() == null ? "System" : uspParam.getCreateBy());
                     emailRequestModel.setParamTemplate(templateData);
