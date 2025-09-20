@@ -5,23 +5,28 @@ import com.alpha.service.exception.CustomException;
 import com.alpha.service.helper.BookingAccountHelper;
 import com.alpha.service.model.BookingAccountModel;
 import com.alpha.service.model.BookingReviewModel;
+import com.alpha.service.model.BookingStatusModel;
 import com.alpha.service.model.placing.PlacingRequestModel;
 import com.alpha.service.model.procedure.UspBookingAccountGetParam;
 import com.alpha.service.model.response.ResponseGlobalModel;
 import com.alpha.service.model.sendemail.EmailRequestModel;
 import com.alpha.service.repository.BookingAccountRepository;
 import com.alpha.service.repository.PlacingAccountRepository;
+import com.alpha.service.repository.LogEmailRepository;
 import com.alpha.service.service.BookingService;
 import com.alpha.service.service.sendemail.EmailService;
+import com.alpha.service.service.sendemail.EmailDispatcher;
 import com.alpha.service.util.Constants;
 import com.alpha.service.util.DataUtil;
 import com.alpha.service.util.ServiceTool;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.Gson;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -47,8 +52,6 @@ import java.util.stream.Collectors;
  */
 @RestController
 @RequestMapping("/booking")
-@CrossOrigin(origins = {"http://localhost:3000", "http://192.168.1.2:3000"}, allowCredentials = "true" ,
-        allowedHeaders = {"Content-Type", "Authorization", "X-Requested-With"})
 @Validated
 public class BookingAccountController {
     private static final Logger logger = LoggerFactory.getLogger(BookingAccountController.class);
@@ -64,6 +67,12 @@ public class BookingAccountController {
     private BookingService bookingService;
     @Autowired
     private EmailService emailService;
+    @Autowired
+    private EmailDispatcher emailDispatcher;
+    @Autowired
+    private com.alpha.service.service.FileStorageService fileStorageService;
+    @Autowired
+    private LogEmailRepository logEmailRepository;
 
     @PostMapping("/doaccount")
     public ResponseEntity<Object> doDataBookingAccount(@RequestBody @Valid UspBookingAccountGetParam bpm) {
@@ -109,7 +118,8 @@ public class BookingAccountController {
 
     @PostMapping("/account")
     public ResponseEntity<Object> doProcessBooking(@RequestParam Map<String, MultipartFile> files,
-                                                   @RequestParam("data") String data) {
+                                                   @RequestParam("data") String data,
+                                                   HttpServletRequest request) {
 
         Map<String, Object> templateData = new HashMap<>();
 
@@ -119,10 +129,26 @@ public class BookingAccountController {
             logger.info("bookCd: {}", data);
             logger.info("pathUrl====>" + dataUtil.getPathUpload());
             logger.info("profile====>" + serviceTool.getActiveProfile());
+            String idem = request.getHeader("X-Idempotency-Key");
+            MDC.put("idemKey", Optional.ofNullable(idem).orElse("-"));
 
             BookingAccountModel bookingAccountModel = new Gson().fromJson(data, BookingAccountModel.class);
             List<BookingAccountModel.DocType> docTypes = new ArrayList<>();
-            List<MultipartFile> attachments = new ArrayList<>(files.values());
+            // Materialize attachments in-memory (byte[]) before leaving request thread
+            List<com.alpha.service.model.sendemail.EmailAttachment> attachments = new ArrayList<>();
+            if (files != null && !files.isEmpty()) {
+                for (MultipartFile f : files.values()) {
+                    try {
+                        attachments.add(new com.alpha.service.model.sendemail.EmailAttachment(
+                                f.getOriginalFilename(),
+                                f.getContentType(),
+                                f.getBytes()
+                        ));
+                    } catch (IOException ex) {
+                        logger.warn("Failed to read attachment {}: {}", f.getOriginalFilename(), ex.getMessage());
+                    }
+                }
+            }
             ResponseGlobalModel<Object> responseGlobalModel = new ResponseGlobalModel<>();
             logger.info("bookingAccountModel==>0>{}", new Gson().toJson(bookingAccountModel));
 
@@ -210,32 +236,35 @@ public class BookingAccountController {
 
             if (responseGlobalModel.getResultCode() == 200) {
                 if (bookingAccountModel.getActionType().equalsIgnoreCase("1")) {
-                    EmailRequestModel emailRequestModel = new EmailRequestModel();
-                    String mailType = "";
-                    if (bookingAccountModel.getActionType().equalsIgnoreCase("1")) {
-                        mailType = "BKNEW";
+                    String revNorm = (bookingAccountModel.getRevDoc() == null || bookingAccountModel.getRevDoc().isBlank()) ? "" : bookingAccountModel.getRevDoc();
+                    if (logEmailRepository.existsSuccess("BKNEW", "bookCd", bookCd, revNorm)) {
+                        logger.warn("Skip email BKNEW; already SUCCESS for bookCd={}, rev={}", bookCd, revNorm);
+                    } else {
+                        EmailRequestModel emailRequestModel = new EmailRequestModel();
+                        String mailType = "";
+                        if (bookingAccountModel.getActionType().equalsIgnoreCase("1")) {
+                            mailType = "BKNEW";
+                        }
+                        emailRequestModel.setMailType(mailType);
+                        emailRequestModel.setActionType("1");
+                        emailRequestModel.setBookCd(bookCd);
+                        emailRequestModel.setClientName(bookingAccountModel.getClientName());
+                        emailRequestModel.setCode(bookCd);
+                        emailRequestModel.setRevDoc(String.valueOf(rev));
+                        emailRequestModel.setBookRev(String.valueOf(rev));
+                        emailRequestModel.setCreatedBy(bookingAccountModel.getCreatedBy() == null ? "System" : bookingAccountModel.getCreatedBy());
+                        bookingAccountModel.setBookCd(bookCd);
+                        templateData.put("bookCd", bookCd);
+                        ObjectMapper objectMapper = new ObjectMapper();
+                        Map<String, Object> paramTemplateMap = objectMapper.convertValue(bookingAccountModel, new TypeReference<Map<String, Object>>() {});
+                        emailRequestModel.setParamTemplate(paramTemplateMap);
+                        System.out.println("<==emailRequestModel==" + new Gson().toJson(emailRequestModel));
+                        emailDispatcher.sendEmailAsync(
+                                new Gson().toJson(emailRequestModel),
+                                attachments,
+                                serviceTool.getProperty("email.service.url") + "/email/send"
+                        );
                     }
-//                    else if (bookingAccountModel.getActionType().equalsIgnoreCase("2")) {
-//                        mailType = "BKREV";
-//                    } else if (bookingAccountModel.getActionType().equalsIgnoreCase("4")) {
-//                        mailType = "BKREV";
-//                    }
-                    emailRequestModel.setMailType(mailType);
-                    emailRequestModel.setActionType("1");
-                    emailRequestModel.setBookCd(bookCd);
-                    emailRequestModel.setClientName(bookingAccountModel.getClientName());
-                    emailRequestModel.setCode(bookCd);
-                    emailRequestModel.setCreatedBy(bookingAccountModel.getCreatedBy() == null ? "System" : bookingAccountModel.getCreatedBy());
-                    bookingAccountModel.setBookCd(bookCd);
-                    templateData.put("bookCd", bookCd);
-                    ObjectMapper objectMapper = new ObjectMapper();
-                    Map<String, Object> paramTemplateMap = objectMapper.convertValue(bookingAccountModel, new TypeReference<Map<String, Object>>() {});
-                    emailRequestModel.setParamTemplate(paramTemplateMap);
-                    System.out.println("<==emailRequestModel==" + new Gson().toJson(emailRequestModel));
-                    emailService.sendEmailWithAttachments(
-                            new Gson().toJson(emailRequestModel),
-                            attachments, serviceTool.getProperty("email.service.url") + "/email/send"
-                    );
                 }
             }
 
@@ -256,6 +285,57 @@ public class BookingAccountController {
 
     @PostMapping("/account/status")
     public ResponseEntity<Object> doProcessBookingStatus(@RequestBody String data) {
+        try {
+            logger.info("Request Body account/status: {}", data);
+            BookingStatusModel bookingStatusModel = new Gson().fromJson(data, BookingStatusModel.class);
+
+            if (bookingStatusModel.getBookCd() == null || bookingStatusModel.getBookCd().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "resultCode", 400,
+                        "message", "bookCd is required"
+                ));
+            }
+            if (bookingStatusModel.getStatus() == null || bookingStatusModel.getStatus().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "resultCode", 400,
+                        "message", "status is required"
+                ));
+            }
+            // Additional validation for CLOSE status '2'
+            if ("2".equalsIgnoreCase(bookingStatusModel.getStatus())) {
+                if (bookingStatusModel.getInsCdClose() == null) {
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "resultCode", 400,
+                            "message", "insCdClose is required when status is CLOSE"
+                    ));
+                }
+            }
+
+            ResponseGlobalModel<Object> responseGlobalModel = helper.doProcessBookingStatusIUD(bookingStatusModel);
+            return ResponseEntity.status(HttpStatus.OK).body(responseGlobalModel);
+        } catch (CustomException e) {
+            logger.error("Error handling request", e);
+            Map<String, Object> errorBody = new HashMap<>();
+            errorBody.put("resultCode", Optional.of(e.getResultCode()));
+            errorBody.put("timestamp", serviceTool.generateTimestamp());
+            errorBody.put("message", e.getMessage());
+            Map<String, String> error = new HashMap<>();
+            error.put("errorDetails", e.getMessage());
+            errorBody.put("error", error);
+            return ResponseEntity.status(e.getResultCode()).body(errorBody);
+        } catch (Exception e) {
+            logger.error("General error handling request", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "resultCode", 500,
+                    "message", "Internal server error",
+                    "timestamp", serviceTool.generateTimestamp(),
+                    "error", Map.of("errorDetails", e.getMessage())
+            ));
+        }
+    }
+
+    @PostMapping("/account/status/old")
+    public ResponseEntity<Object> doProcessBookingStatusOld(@RequestBody String data) {
 
         Map<String, Object> templateData = new HashMap<>();
 
@@ -416,32 +496,25 @@ public class BookingAccountController {
                             case "4" -> "claimratio";
                             case "5" -> "termcondition";
                             case "6" -> "loa";
+                            case "7" -> "companyprofile";
+                            case "8" -> "Proposal";
+                            case "9" -> "Comparation";
                             default -> docTypeOri;
                         };
                         logger.info("docTypeDesc==>{}", docTypeDesc);
 
                         int counter = calculateRevisionNumber(dataUtil.getPathUpload() + "/" + bookCd + "/");
 
-                        String folder = dataUtil.getPathUpload() + "/" + bookCd + "/rev" + counter + "/" + docTypeDesc;
-                        File folders = new File(folder);
-                        if (!folders.exists()) {
-                            createDirectoriesRecursively(folders);
-                        }
-
-
-                        String newName = baseName + "_rev" + counter + extension;
-
                         try {
-                            Path pathDoc = Paths.get(folder, newName);
-                            InputStream inDoc = file.getInputStream();
-                            Files.copy(inDoc, pathDoc);
-                            logger.info("Revised file saved as {}", pathDoc);
-
+                            Path saved = fileStorageService.saveWithOverwriteAndBackup(
+                                    "booking", bookCd, counter, null, docTypeDesc, file, Optional.ofNullable(bookingAccountModel.getCreatedBy()).orElse("system")
+                            );
+                            logger.info("Revised file saved as {}", saved);
 
                             docType.setCode(code);
                             docType.setRevDoc(String.valueOf(counter));
                             docType.setDescp(docTypeDesc);
-                            docType.setUrlPath(pathDoc.toString().replace(File.separatorChar, '/'));
+                            docType.setUrlPath(saved.toString().replace(File.separatorChar, '/'));
 
                             docTypes.add(docType);
 
@@ -548,41 +621,21 @@ public class BookingAccountController {
                             case "5" -> "termcondition";
                             case "6" -> "loa";
                             case "7" -> "companyprofile";
+                            case "8" -> "Proposal";
+                            case "9" -> "Comparation";
                             default -> docTypeOri;
                         };
-                        String folder = dataUtil.getPathUpload() + "/" + bookCd + "/rev" + lastRev + "/" + docTypeDesc;
-                        File folders = new File(folder);
-                        if (!folders.exists()) {
-                            createDirectoriesRecursively(folders);
-                        }
-
-                        String newName = baseName + "_rev" + lastRev + extension;
-
                         try {
-                            Path pathDoc = Paths.get(folder, newName);
-                            InputStream inDoc = file.getInputStream();
-
-                            if (Files.exists(pathDoc)) {
-                                // Rename file lama dulu
-                                String timestamp = String.valueOf(System.currentTimeMillis());
-                                Path renamedPath = Paths.get(folder, baseName + "_" + timestamp + extension);
-                                Files.move(pathDoc, renamedPath);
-                                logger.info("Existing file renamed to {}", renamedPath);
-                            }
-
-                            // Save file baru
-                            Files.copy(inDoc, pathDoc);
-                            logger.info("Saved file at {}", pathDoc);
-
+                            Path saved = fileStorageService.saveWithOverwriteAndBackup(
+                                    "booking", bookCd, lastRev, null, docTypeDesc, file, Optional.ofNullable(bookingAccountModel.getCreatedBy()).orElse("system")
+                            );
+                            String finalPath = saved.toString().replace(File.separatorChar, '/');
 
                             logger.info("bookingAccountModel===>3>{}", new Gson().toJson(bookingAccountModel));
                             // Update isi di bookingAccountModel
                             bookingAccountModel.getDocTypes().forEach(d -> {
-                                logger.info("d.getCode() ==> " + d.getCode());
-                                logger.info("code ==> " + code);
                                 if (d.getCode().equalsIgnoreCase(code)) {
                                     d.setDescp(docTypeDesc);
-                                    String finalPath = pathDoc.toString().replace(File.separatorChar, '/');
                                     String oldPath = d.getUrlPath();
 
                                     if (oldPath == null || oldPath.startsWith("blob:") || oldPath.isBlank()) {
@@ -707,11 +760,6 @@ public class BookingAccountController {
                              BookingAccountModel bookingAccountModel, Logger logger) {
         try {
             logger.info("Processing code={}, fileOriginalName={}", code, file.getOriginalFilename());
-            String fileName = Objects.requireNonNull(file.getOriginalFilename())
-                    .replaceAll("[^a-zA-Z0-9\\.\\-_]+", "_");
-
-            String baseName = fileName.substring(0, fileName.lastIndexOf('.'));
-            String extension = fileName.substring(fileName.lastIndexOf('.'));
 
             String docTypeOri = file.getName();
             String docTypeDesc = switch (code) {
@@ -722,41 +770,23 @@ public class BookingAccountController {
                 case "5" -> "termcondition";
                 case "6" -> "loa";
                 case "7" -> "companyprofile";
+                case "8" -> "Proposal";
+                case "9" -> "Comparation";
                 default -> docTypeOri;
             };
-            String folder = dataUtil.getPathUpload() + "/" + bookCd + "/rev" + rev + "/" + docTypeDesc;
-            File folders = new File(folder);
-            if (!folders.exists()) {
-                boolean created = folders.mkdirs();
-                logger.info("Created directory {}? {}", folders.getAbsolutePath(), created);
-            }
 
-            String newName = baseName + extension;
-            Path pathDoc = Paths.get(folder, newName);
-
-            InputStream inDoc = file.getInputStream();
-
-            if (Files.exists(pathDoc)) {
-                // Rename file lama dulu
-                String timestamp = String.valueOf(System.currentTimeMillis());
-                Path renamedPath = Paths.get(folder, baseName + "_" + timestamp + extension);
-                Files.move(pathDoc, renamedPath);
-                logger.info("Existing file renamed to {}", renamedPath);
-            }
-
-            Files.copy(inDoc, pathDoc, StandardCopyOption.REPLACE_EXISTING);
-            logger.info("✅ Saved file at {}", pathDoc);
+            String actor = Optional.ofNullable(bookingAccountModel.getCreatedBy()).orElse("system");
+            Path saved = fileStorageService.saveWithOverwriteAndBackup(
+                    "booking", bookCd, rev, null, docTypeDesc, file, actor
+            );
+            String finalPath = saved.toString().replace(java.io.File.separatorChar, '/');
 
             // Update isi di bookingAccountModel
             bookingAccountModel.getDocTypes().forEach(d -> {
-                logger.info("d.getCode() ==> " + d.getCode());
-                logger.info("code ==> " + code);
                 if (d.getCode().equalsIgnoreCase(code)) {
                     d.setDescp(docTypeDesc);
                     d.setRevDoc(String.valueOf(rev));
-                    String finalPath = pathDoc.toString().replace(File.separatorChar, '/');
                     String oldPath = d.getUrlPath();
-
                     if (oldPath == null || oldPath.startsWith("blob:") || oldPath.isBlank()) {
                         d.setActionType("1");
                     } else if (!oldPath.equals(finalPath)) {

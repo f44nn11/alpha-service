@@ -20,8 +20,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/sysprop")
-@CrossOrigin(origins = {"http://localhost:3000", "http://192.168.1.2:3000"}, allowCredentials = "true" ,
-        allowedHeaders = {"Content-Type", "Authorization", "X-Requested-With"})
 @Validated
 public class SyspropMasterController {
     private static final Logger logger = LoggerFactory.getLogger(SyspropMasterController.class);

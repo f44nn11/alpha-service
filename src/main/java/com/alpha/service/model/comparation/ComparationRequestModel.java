@@ -24,6 +24,11 @@ public class ComparationRequestModel {
     private List<InsuranceModel> insurances;
     private List<ComparationModel> comparations;
 
+    // Emergency Force (optional)
+    private Boolean force;                 // optional
+    private String forceMode;              // "PLACEHOLDER" | "FALLBACK"
+    private String forceReason;            // required if force==true
+    private List<String> forcedInsurers;   // list insCd as String
 
     @Data
     public static class InsuranceModel {
@@ -55,5 +60,6 @@ public class ComparationRequestModel {
         private List<String> insurances;
         private String rev;
         private String revDoc;
+        private String isLatest;
     }
 }

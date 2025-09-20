@@ -5,6 +5,7 @@ import com.alpha.service.exception.CustomException;
 import com.alpha.service.mapper.BookingAccountMapper;
 import com.alpha.service.model.BookingAccountModel;
 import com.alpha.service.model.BookingReviewModel;
+import com.alpha.service.model.BookingStatusModel;
 import com.alpha.service.model.ProcedureParamModel;
 import com.alpha.service.model.procedure.UspBookingAccountDtlParam;
 import com.alpha.service.model.procedure.UspBookingAccountGetParam;
@@ -315,6 +316,73 @@ public class BookingAccountHelper {
             throw new RuntimeException("Error building procedure parameters", e);
         }
         return params;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseGlobalModel<Object> doProcessBookingStatusIUD(BookingStatusModel model) {
+        ResponseGlobalModel<Object> responseGlobalModel;
+        ResponseGlobalModel<Object> resp = new ResponseGlobalModel<>();
+        try {
+            List<ProcedureParamModel> params = buildBookingStatusParams(model);
+            resp = bookingAccountSIUDService.bookingAccountProcedure("USP_BOOKING_STATUS", params);
+            if (resp.getResultCode() != 200) {
+                throw new CustomException(resp.getMessage(), resp.getResultCode(), resp.getData());
+            }
+            responseGlobalModel = new ResponseGlobalModel<>();
+            responseGlobalModel.setResultCode(200);
+            responseGlobalModel.setMessage("Booking status processed successfully");
+            responseGlobalModel.setData(resp.getData());
+        } catch (CustomException e) {
+            responseGlobalModel = new ResponseGlobalModel<>();
+            responseGlobalModel.setResultCode(e.getResultCode());
+            responseGlobalModel.setMessage(e.getMessage());
+            responseGlobalModel.setError((Map<String, String>) e.getData());
+            throw e;
+        }
+        return responseGlobalModel;
+    }
+
+    private List<ProcedureParamModel> buildBookingStatusParams(BookingStatusModel model) {
+        List<ProcedureParamModel> params = new ArrayList<>();
+        try {
+            final String status = model.getStatus();
+            final boolean isClose = "2".equals(status);
+
+            // Normalisasi insCdClose & closeDt
+            Long insCdClose = isClose ? model.getInsCdClose() : null;
+            java.sql.Timestamp closeDt = isClose ? coerceToTimestamp(model.getCloseDt()) : null;
+
+            params.add(new ProcedureParamModel("p_bookCd", model.getBookCd(), String.class, ParameterMode.IN));
+            params.add(new ProcedureParamModel("p_status", status, String.class, ParameterMode.IN));
+            params.add(new ProcedureParamModel("p_description", model.getDescription(), String.class, ParameterMode.IN));
+            params.add(new ProcedureParamModel("p_insCdClose", insCdClose, Long.class, ParameterMode.IN));
+            params.add(new ProcedureParamModel("p_closeDt", closeDt, java.sql.Timestamp.class, ParameterMode.IN));
+            params.add(new ProcedureParamModel("p_createdBy", model.getCreatedBy(), String.class, ParameterMode.IN));
+
+            // OUT params
+            params.add(new ProcedureParamModel("p_resultCode", null, Integer.class, ParameterMode.OUT));
+            params.add(new ProcedureParamModel("p_message", null, String.class, ParameterMode.OUT));
+            params.add(new ProcedureParamModel("p_resultJson", null, String.class, ParameterMode.OUT));
+        } catch (Exception e) {
+            throw new RuntimeException("Error building procedure parameters", e);
+        }
+        return params;
+    }
+
+    private static java.sql.Timestamp coerceToTimestamp(Object closeDtObj) {
+        if (closeDtObj == null) return null;
+        if (closeDtObj instanceof java.sql.Timestamp ts) return ts;
+        if (closeDtObj instanceof java.time.LocalDateTime ldt) return java.sql.Timestamp.valueOf(ldt);
+        if (closeDtObj instanceof java.util.Date d) return new java.sql.Timestamp(d.getTime());
+
+        if (closeDtObj instanceof CharSequence cs) {
+            String s = cs.toString().trim();
+            if (s.isEmpty() || "null".equalsIgnoreCase(s)) return null;
+            if (s.length() == 10) s += " 00:00:00";     // yyyy-MM-dd → pad time
+            if (s.length() > 19)  s  = s.substring(0, 19); // trim millis/timezone
+            return java.sql.Timestamp.valueOf(s);      // expects yyyy-MM-dd HH:mm:ss
+        }
+        throw new IllegalArgumentException("Unsupported closeDt type: " + closeDtObj.getClass());
     }
 
     private List<ProcedureParamModel> buildBookingAccountParamsFromModel(UspBookingAccountGetParam model) {

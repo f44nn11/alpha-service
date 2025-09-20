@@ -25,8 +25,6 @@ import java.util.*;
 
 @RestController
 @RequestMapping
-@CrossOrigin(origins = {"http://localhost:3000", "http://192.168.1.2:3000"}, allowCredentials = "true" ,
-        allowedHeaders = {"Content-Type", "Authorization", "X-Requested-With"})
 public class BookingVisitController {
 
     private static final Logger logger = LoggerFactory.getLogger(BookingVisitController.class);

@@ -3,12 +3,14 @@ package com.alpha.service.service.sendemail;
 
 import com.alpha.service.model.response.ResponseGlobalModel;
 import com.alpha.service.model.sendemail.EmailRequestModel;
+import com.alpha.service.model.sendemail.EmailAttachment;
 import com.alpha.service.repository.LogEmailAppRepository;
 import com.google.gson.Gson;
 import org.slf4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -133,6 +135,69 @@ public class EmailService {
 
             ResponseGlobalModel<?> emailResponse = new Gson().fromJson(result, ResponseGlobalModel.class);
 
+            if (emailResponse.getResultCode() == 200) {
+                responseGlobalModel = ResponseGlobalModel.<Object>builder()
+                        .resultCode(200)
+                        .message(hasAttachment
+                                ? "Email sent successfully with attachment."
+                                : "Email sent successfully without attachment.")
+                        .data(emailResponse.getData())
+                        .build();
+            } else {
+                responseGlobalModel = ResponseGlobalModel.<Object>builder()
+                        .resultCode(emailResponse.getResultCode())
+                        .message(emailResponse.getMessage())
+                        .error(emailResponse.getError())
+                        .data(emailResponse.getData())
+                        .build();
+            }
+        } catch (Exception e) {
+            responseGlobalModel = ResponseGlobalModel.<Object>builder()
+                    .resultCode(500)
+                    .message("Failed to send email: " + e.getMessage())
+                    .error(Map.of("error", e.getMessage()))
+                    .build();
+        }
+        return responseGlobalModel;
+    }
+
+    public ResponseGlobalModel<Object> sendEmailWithByteAttachments(String emailRequest, List<EmailAttachment> attachments, String serviceUrl) {
+        ResponseGlobalModel<Object> responseGlobalModel = new ResponseGlobalModel<>();
+        try {
+            MultipartBodyBuilder builder = new MultipartBodyBuilder();
+            builder.part("data", emailRequest);
+
+            boolean hasAttachment = attachments != null && !attachments.isEmpty();
+            if (hasAttachment) {
+                for (EmailAttachment att : attachments) {
+                    final String fname = att.getFileName() == null ? "attachment" : att.getFileName();
+                    ByteArrayResource res = new ByteArrayResource(att.getBytes()) {
+                        @Override
+                        public String getFilename() {
+                            return fname;
+                        }
+                    };
+                    MultipartBodyBuilder.PartBuilder partBuilder = builder.part("attachments", res)
+                            .header("Content-Disposition", "form-data; name=attachments; filename=" + fname);
+                    if (att.getContentType() != null && !att.getContentType().isBlank()) {
+                        try {
+                            partBuilder.contentType(MediaType.parseMediaType(att.getContentType()));
+                        } catch (Exception ignore) {
+                            // ignore invalid content type
+                        }
+                    }
+                }
+            }
+
+            String result = webClient.post()
+                    .uri(serviceUrl)
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .bodyValue(builder.build())
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            ResponseGlobalModel<?> emailResponse = new Gson().fromJson(result, ResponseGlobalModel.class);
             if (emailResponse.getResultCode() == 200) {
                 responseGlobalModel = ResponseGlobalModel.<Object>builder()
                         .resultCode(200)

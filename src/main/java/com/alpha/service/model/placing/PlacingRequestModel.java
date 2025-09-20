@@ -20,6 +20,8 @@ public class PlacingRequestModel implements PlacingInterface {
     private String actionType;
     private List<Insurance> insurances;
 
+    private List<Integer> sendList;
+
 
     @Override
     public String getPlacingCd() {
@@ -39,6 +41,7 @@ public class PlacingRequestModel implements PlacingInterface {
         private String descriptionDtl;
         private String status;
         private List<DocType> docTypes;
+        private String insType; // Added to pass through to procedure via insPlacing JSON
     }
     @Data
     public static class DocType {
@@ -46,6 +49,7 @@ public class PlacingRequestModel implements PlacingInterface {
         private String revDoc;
         private String descp;
         private String urlPath;
+        private Boolean checked;
         private boolean isGlobal;
         private boolean isPerInsurance;
     }

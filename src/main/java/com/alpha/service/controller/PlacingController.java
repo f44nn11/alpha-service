@@ -20,6 +20,7 @@ import com.google.gson.GsonBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
@@ -27,10 +28,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /*
  * Created by: fkusu
@@ -38,8 +36,6 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/placing")
-@CrossOrigin(origins = {"http://localhost:3000", "http://192.168.1.2:3000"}, allowCredentials = "true",
-        allowedHeaders = {"Content-Type", "Authorization", "X-Requested-With"})
 @Validated
 public class PlacingController {
     private final Logger logger = LoggerFactory.getLogger(PlacingController.class);
@@ -307,13 +303,17 @@ public class PlacingController {
             ResponseGlobalModel<Object> procedureResult = placingAccountService.doProcessInsProposalRevision(proposalRevision);
 
             if (procedureResult.getResultCode() == 200) {
+                Set<Integer> sendSet = Optional.ofNullable(proposalRevision.getSendList())
+                        .map(HashSet::new)
+                        .orElse(null);
+
                 responseGlobalModel.setResultCode(procedureResult.getResultCode());
                 responseGlobalModel.setMessage(procedureResult.getMessage());
                 String mailType = "";
                 if (proposalRevision.getActionType().equalsIgnoreCase("1")) {
                     mailType = "PRNEW";
                 } else if (proposalRevision.getActionType().equalsIgnoreCase("2")) {
-                    mailType = "PRNEW";
+                    mailType = "PRREV";
                 }
                 if (proposalRevision.getInsurances() != null && !proposalRevision.getInsurances().isEmpty()) {
                     for (PlacingRequestModel.Insurance insurance : proposalRevision.getInsurances()) {
@@ -362,56 +362,60 @@ public class PlacingController {
                             }
                         }
 
-                        EmailRequestModel emailRequestModel = new EmailRequestModel();
-                        emailRequestModel.setMailType(mailType);
-                        emailRequestModel.setCode(placingCd);
-                        emailRequestModel.setBookCd(bookCd);
-                        emailRequestModel.setActionType("2");
-                        emailRequestModel.setCreatedBy(proposalRevision.getCreatedBy() == null ? "System" : proposalRevision.getCreatedBy());
+                        boolean shouldSend = (sendSet == null) || sendSet.contains(insurance.getInsCd());
+                        if (shouldSend) {
+                            EmailRequestModel emailRequestModel = new EmailRequestModel();
+                            emailRequestModel.setMailType(mailType);
+                            emailRequestModel.setCode(placingCd);
+                            emailRequestModel.setBookCd(bookCd);
+                            emailRequestModel.setActionType("2");
+                            emailRequestModel.setCreatedBy(proposalRevision.getCreatedBy() == null ? "System" : proposalRevision.getCreatedBy());
 
-                        Map<String, Object> templateData = new HashMap<>();
-                        templateData.put("mailType", mailType);
-                        templateData.put("actionType", "2");
-                        templateData.put("placingCd", placingCd);
-                        templateData.put("bookCd", bookCd);
-                        templateData.put("code", placingCd);
-                        templateData.put("insCd", insCd);
-                        emailRequestModel.setParamTemplate(templateData);
-                        System.out.println("emailRequestModel==0>" + new Gson().toJson(emailRequestModel));
+                            Map<String, Object> templateData = new HashMap<>();
+                            templateData.put("mailType", mailType);
+                            templateData.put("actionType", "2");
+                            templateData.put("placingCd", placingCd);
+                            templateData.put("bookCd", bookCd);
+                            templateData.put("code", placingCd);
+                            templateData.put("insCd", insCd);
+                            emailRequestModel.setParamTemplate(templateData);
+                            System.out.println("emailRequestModel==0>" + new Gson().toJson(emailRequestModel));
 //                        ResponseGlobalModel<Object> emailResult = emailService.sendEmailWithAttachments(
 //                                new Gson().toJson(emailRequestModel),
 //                                serviceTool.convertUrlsToMultipartFiles(attachmentUrls),
 //                                serviceTool.getProperty("email.service.url") + "/email/send"
 //                        );
 
-                        //insert Log Email
-                        LogEmailApp log = new LogEmailApp();
-                        log.setRefType("PROPOSAL REVISION");
-                        log.setRefId(placingCd);
-                        log.setRefSubId(insCd);
-                        log.setMailType(mailType);
-                        log.setSubject(emailRequestModel.getSubject());
-                        log.setMailTo("");
-                        log.setAttachmentInfo(new Gson().toJson(attachmentUrls));
-                        log.setStatus("PROCESSING");
-                        log.setRequestDt(LocalDateTime.now());
-                        log.setCreateBy(emailRequestModel.getCreatedBy());
-                        LogEmailApp savedLog = logEmailAppService.createLog(log);
-                        Long logId = savedLog.getId();
+                            //insert Log Email
+                            LogEmailApp log = new LogEmailApp();
+                            log.setRefType("PROPOSAL REVISION");
+                            log.setRefId(placingCd);
+                            log.setRefSubId(insCd);
+                            log.setMailType(mailType);
+                            log.setSubject(emailRequestModel.getSubject());
+                            log.setMailTo("");
+                            log.setAttachmentInfo(new Gson().toJson(attachmentUrls));
+                            log.setStatus("PROCESSING");
+                            log.setRequestDt(LocalDateTime.now());
+                            log.setCreateBy(emailRequestModel.getCreatedBy());
+                            LogEmailApp savedLog = logEmailAppService.createLog(log);
+                            Long logId = savedLog.getId();
 
-                        emailService.sendEmailWithAttachmentsAsync(
-                                emailRequestModel,
-                                serviceTool.convertUrlsToMultipartFiles(attachmentUrls),
-                                serviceTool.getProperty("email.service.url") + "/email/send",
-                                insCd,
-                                logId
-                        );
+                            emailService.sendEmailWithAttachmentsAsync(
+                                    emailRequestModel,
+                                    serviceTool.convertUrlsToMultipartFiles(attachmentUrls),
+                                    serviceTool.getProperty("email.service.url") + "/email/send",
+                                    insCd,
+                                    logId
+                            );
 
-                        Map<String, Object> emailResultMap = new HashMap<>();
-                        emailResultMap.put("insCd", insCd);
-                        emailResultMap.put("resultCode", 200);
-                        emailResultMap.put("message", "PROCESSING");
-                        emailResults.add(emailResultMap);
+                            Map<String, Object> emailResultMap = new HashMap<>();
+                            emailResultMap.put("insCd", insCd);
+                            emailResultMap.put("resultCode", 200);
+                            emailResultMap.put("message", "PROCESSING");
+                            emailResults.add(emailResultMap);
+                        }
+
 
                         String docJson = "";
                         if (actionType.equalsIgnoreCase("1")) {
@@ -442,6 +446,137 @@ public class PlacingController {
             errorResponse.setResultCode(500);
             errorResponse.setMessage("Internal Server Error: " + e.getMessage());
             return ResponseEntity.status(500).body(errorResponse);
+        }
+    }
+
+    @PostMapping(
+            value = "/proposal/revision/resend",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ResponseEntity<ResponseGlobalModel<Object>> resendProposalRevision(
+            @RequestBody PlacingRequestModel request
+    ) {
+        ResponseGlobalModel<Object> response = new ResponseGlobalModel<>();
+        List<Map<String, Object>> emailResults = new ArrayList<>();
+
+        try {
+            logger.info("Received proposal revision RESEND: {}",
+                    new GsonBuilder().setPrettyPrinting().create().toJson(request));
+
+            // ---- basic validation ----
+            if (request == null
+                    || request.getBookCd() == null
+                    || request.getPlacingCd() == null
+                    || request.getActionType() == null
+                    || request.getInsurances() == null
+                    || request.getInsurances().isEmpty()) {
+                response.setResultCode(400);
+                response.setMessage("Invalid request payload");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            if (!"2".equalsIgnoreCase(request.getActionType())) {
+                response.setResultCode(400);
+                response.setMessage("actionType must be '2' for RESEND");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            final String bookCd   = request.getBookCd();
+            final String placingCd= request.getPlacingCd();
+
+            // ---- persist / procedure call (tetap dipanggil seperti original) ----
+            ResponseGlobalModel<Object> procedureResult =
+                    placingAccountService.doProcessInsProposalRevision(request);
+
+            if (procedureResult == null || procedureResult.getResultCode() != 200) {
+                // propagate error dari service
+                return ResponseEntity.status(400).body(procedureResult != null ? procedureResult : response);
+            }
+
+            // ---- siapkan mailType untuk resend proposal revision ----
+            final String mailType = "PRREV"; // karena actionType "2"
+
+            // ---- loop insurances ----
+            for (PlacingRequestModel.Insurance insurance : request.getInsurances()) {
+                String insCd = String.valueOf(insurance.getInsCd());
+
+                // ambil attachment dari docTypes yang checked + punya urlPath
+                List<String> attachmentUrls = new ArrayList<>();
+                if (insurance.getDocTypes() != null) {
+                    for (PlacingRequestModel.DocType doc : insurance.getDocTypes()) {
+                        boolean checked = (doc.getChecked() != null ? doc.getChecked() : false);
+                        String urlPath  = doc.getUrlPath();
+                        if (checked && urlPath != null && !urlPath.isEmpty()) {
+                            attachmentUrls.add(urlPath);
+                        }
+                    }
+                }
+
+                // siapkan email request
+                EmailRequestModel emailReq = new EmailRequestModel();
+                emailReq.setMailType(mailType);
+                emailReq.setCode(placingCd);
+                emailReq.setBookCd(bookCd);
+                emailReq.setActionType("2");
+                emailReq.setCreatedBy(
+                        request.getCreatedBy() == null ? "System" : String.valueOf(request.getCreatedBy())
+                );
+
+                Map<String, Object> tmpl = new HashMap<>();
+                tmpl.put("mailType",   mailType);
+                tmpl.put("actionType", "2");
+                tmpl.put("placingCd",  placingCd);
+                tmpl.put("bookCd",     bookCd);
+                tmpl.put("code",       placingCd);
+                tmpl.put("insCd",      insCd);
+                emailReq.setParamTemplate(tmpl);
+
+                // log email
+                LogEmailApp log = new LogEmailApp();
+                log.setRefType("PROPOSAL REVISION");
+                log.setRefId(placingCd);
+                log.setRefSubId(insCd);
+                log.setMailType(mailType);
+                log.setSubject(emailReq.getSubject());
+                log.setMailTo(""); // diisi oleh service email
+                log.setAttachmentInfo(new Gson().toJson(attachmentUrls));
+                log.setStatus("PROCESSING");
+                log.setRequestDt(LocalDateTime.now());
+                log.setCreateBy(emailReq.getCreatedBy());
+
+                LogEmailApp saved = logEmailAppService.createLog(log);
+                Long logId = saved.getId();
+
+                // kirim email async (attachment diambil dari urlPath, tanpa multipart dari client)
+                emailService.sendEmailWithAttachmentsAsync(
+                        emailReq,
+                        serviceTool.convertUrlsToMultipartFiles(attachmentUrls),
+                        serviceTool.getProperty("email.service.url") + "/email/send",
+                        insCd,
+                        logId
+                );
+
+                Map<String, Object> one = new HashMap<>();
+                one.put("insCd", insCd);
+                one.put("resultCode", 200);
+                one.put("message", "PROCESSING");
+                emailResults.add(one);
+            }
+
+            response.setResultCode(200);
+            response.setMessage("PROCESSING");
+            response.setData(emailResults);
+            logger.info("RESEND processed: placingCd={}, bookCd={}, results={}", placingCd, bookCd, emailResults);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("Error processing proposal revision RESEND: ", e);
+            ResponseGlobalModel<Object> err = new ResponseGlobalModel<>();
+            err.setResultCode(500);
+            err.setMessage("Internal Server Error: " + e.getMessage());
+            return ResponseEntity.status(500).body(err);
         }
     }
 
@@ -666,7 +801,7 @@ public class PlacingController {
 
             if ("1".equals(comparationRequestParam.getActionType()) && (files == null || files.isEmpty())) {
                 response.setResultCode(400);
-                response.setMessage("At least one file must be uploaded.");
+                response.setMessage("At least one file comparation must be uploaded.");
                 return ResponseEntity.badRequest().body(response);
             }
 

@@ -63,18 +63,69 @@ public class ServiceTool {
     public List<MultipartFile> convertUrlsToMultipartFiles(List<String> urls) {
         List<MultipartFile> files = new ArrayList<>();
 
-        for (String filePath : urls) {
-            try (InputStream inputStream = new FileInputStream(new File(filePath))) {
-                byte[] fileBytes = IOUtils.toByteArray(inputStream);
-                String fileName = Paths.get(filePath).getFileName().toString(); // Ambil nama file dari path lokal
+        if (urls == null || urls.isEmpty()) {
+            return files;
+        }
 
-                String mimeType = getMimeType(filePath);
+        for (String rawLocation : urls) {
+            String location = Optional.ofNullable(rawLocation).map(String::trim).orElse("");
+            if (location.isEmpty()) {
+                continue;
+            }
+
+            try {
+                byte[] fileBytes;
+                String fileName;
+                String mimeType = "application/octet-stream";
+
+                // Handle HTTP/HTTPS URLs
+                if (location.matches("(?i)^https?://.*")) {
+                    URL url = new URL(location);
+                    try (InputStream inputStream = url.openStream()) {
+                        fileBytes = IOUtils.toByteArray(inputStream);
+                    }
+                    String pathPart = Optional.ofNullable(url.getPath()).orElse("");
+                    fileName = Paths.get(pathPart).getFileName() != null ? Paths.get(pathPart).getFileName().toString() : "file";
+                    String ct = url.openConnection().getContentType();
+                    if (ct != null && !ct.isBlank()) {
+                        mimeType = ct;
+                    } else {
+                        mimeType = guessMimeTypeFromName(fileName);
+                    }
+                }
+                // Handle file:// URLs
+                else if (location.matches("(?i)^file:.*")) {
+                    Path path = Paths.get(new URL(location).toURI());
+                    if (!Files.exists(path)) {
+                        logger.error("File not found (file URL): {}", path.toAbsolutePath());
+                        continue;
+                    }
+                    try (InputStream inputStream = Files.newInputStream(path)) {
+                        fileBytes = IOUtils.toByteArray(inputStream);
+                    }
+                    fileName = path.getFileName().toString();
+                    mimeType = getMimeType(path.toString());
+                }
+                // Handle local filesystem path
+                else {
+                    String normalized = normalizeLocalPath(location);
+                    Path path = Paths.get(normalized);
+                    if (!Files.exists(path)) {
+                        logger.error("File not found (local path): {}", path.toAbsolutePath());
+                        continue;
+                    }
+                    try (InputStream inputStream = Files.newInputStream(path)) {
+                        fileBytes = IOUtils.toByteArray(inputStream);
+                    }
+                    fileName = path.getFileName().toString();
+                    mimeType = getMimeType(path.toString());
+                }
 
                 MultipartFile multipartFile = new MockMultipartFile(fileName, fileName, mimeType, fileBytes);
                 files.add(multipartFile);
             } catch (Exception e) {
                 logger.error(e.getMessage());
-                logger.error("Exception occurred while converting file: {}", filePath, e);
+                logger.error("Exception occurred while converting file: {}", location, e);
             }
         }
 
@@ -83,11 +134,35 @@ public class ServiceTool {
     private String getMimeType(String fileUrl) {
         try {
             Path path = Paths.get(fileUrl);
-            String mimeType = Files.probeContentType(path);
-            return mimeType != null ? mimeType : "application/octet-stream";
+            if (Files.exists(path)) {
+                String mimeType = Files.probeContentType(path);
+                if (mimeType != null) return mimeType;
+            }
+        } catch (Exception ignored) {
+        }
+        // Fallback to guessing by file name/extension
+        String byName = guessMimeTypeFromName(Paths.get(fileUrl).getFileName() != null ? Paths.get(fileUrl).getFileName().toString() : fileUrl);
+        return byName != null ? byName : "application/octet-stream";
+    }
+
+    private String guessMimeTypeFromName(String name) {
+        try {
+            String guess = java.net.URLConnection.guessContentTypeFromName(name);
+            return (guess != null && !guess.isBlank()) ? guess : "application/octet-stream";
         } catch (Exception e) {
             return "application/octet-stream";
         }
+    }
+
+    private boolean isWindows() {
+        String os = System.getProperty("os.name");
+        return os != null && os.toLowerCase().contains("win");
+    }
+
+    private String normalizeLocalPath(String path) {
+        if (path == null) return null;
+        // Convert separators to current OS style to improve cross-platform handling
+        return isWindows() ? path.replace("/", "\\") : path.replace("\\", "/");
     }
     public String saveFile(MultipartFile file, String baseFolder, String bookCd, String maxRev, String placingCd, String revDoc, String docFolder, String typeFlag) throws IOException {
         // Siapkan path direktori

@@ -16,6 +16,7 @@ import com.alpha.service.service.sendemail.EmailService;
 import com.alpha.service.service.sendemail.LogEmailAppService;
 import com.alpha.service.util.DataUtil;
 import com.alpha.service.util.ServiceTool;
+import com.alpha.service.service.FileStorageService;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -49,6 +50,8 @@ public class PlacingAccountSIUDService {
     private EmailService emailService;
     @Autowired
     private ServiceTool serviceTool;
+    @Autowired
+    private FileStorageService fileStorageService;
     @Autowired
     private DataUtil dataUtil;
     @Autowired
@@ -244,6 +247,7 @@ public class PlacingAccountSIUDService {
                     String placingCd = (String) responseData.get("placingCd") == null ? placingAccountModel.getPlacingCd() : (String) responseData.get("placingCd");
                     String bookCd = (String) responseData.get("bookCd") == null ? placingAccountModel.getBookCd() : (String) responseData.get("bookCd");
 
+                    //diremark flow baru placing tidak kirim document //20250817
                     String mailType = "";
                     if (placingAccountModel.getActionType().equalsIgnoreCase("1")) {
                         mailType = "PLNEW";
@@ -256,12 +260,25 @@ public class PlacingAccountSIUDService {
 
                             String insCd = String.valueOf(insurance.getInsCd());
                             List<String> attachmentUrls = new ArrayList<>();
+                            List<String> attachmentNames = new ArrayList<>();
                             for (PlacingRequestModel.DocType docType : insurance.getDocTypes()) {
                                 String urlPath = docType.getUrlPath();
                                 if (urlPath != null && !urlPath.isEmpty()) {
                                     attachmentUrls.add(urlPath);
+                                    String name = docType.getDescp();
+                                    if (name != null && !name.isBlank()) {
+                                        name = name.replace("<", "&lt;").replace(">", "&gt;");
+                                        attachmentNames.add(name.trim());
+                                    }
                                 }
                             }
+
+                            String attachmentListHtml =
+                                    attachmentNames.isEmpty()
+                                            ? "<li>Tidak ada dokumen</li>"
+                                            : attachmentNames.stream()
+                                            .map(n -> "<li>" + n + "</li>")
+                                            .collect(java.util.stream.Collectors.joining());
 
                             EmailRequestModel emailRequestModel = new EmailRequestModel();
                             emailRequestModel.setMailType(mailType);
@@ -277,6 +294,7 @@ public class PlacingAccountSIUDService {
                             templateData.put("bookCd", bookCd);
                             templateData.put("code", placingCd);
                             templateData.put("insCd", insCd);
+                            templateData.put("ATTACHMENT_LIST", attachmentListHtml);
                             emailRequestModel.setParamTemplate(templateData);
                             System.out.println("emailRequestModel==0>" + new Gson().toJson(emailRequestModel));
 //                        ResponseGlobalModel<Object> emailResult = emailService.sendEmailWithAttachments(
@@ -302,7 +320,8 @@ public class PlacingAccountSIUDService {
 
                             emailService.sendEmailWithAttachmentsAsync(
                                     emailRequestModel,
-                                    serviceTool.convertUrlsToMultipartFiles(attachmentUrls),
+//                                    serviceTool.convertUrlsToMultipartFiles(attachmentUrls),
+                                    null,
                                     serviceTool.getProperty("email.service.url") + "/email/send",
                                     insCd,
                                     logId
@@ -658,9 +677,11 @@ public class PlacingAccountSIUDService {
                         if (files != null && !files.isEmpty()) {
                             MultipartFile file = files.get(fileKey);
                             if (file != null && !file.isEmpty()) {
-                                String docFolder = doc.getDescp();
-                                String urlPath = serviceTool.saveFileWithBase(file, baseFolder, bookCd, maxRev, placingCd, String.valueOf(nextRevDoc), docFolder, "proposal");
-
+                                // Save using new storage service per module=proposal and fixed subfolder Proposal
+                                java.nio.file.Path savedPath = fileStorageService.saveWithOverwriteAndBackup(
+                                        "proposal", bookCd, Integer.valueOf(maxRev), placingCd, "Proposal", file, uspParam.getCreateBy()
+                                );
+                                String urlPath = savedPath.toString().replace('\\', '/');
                                 // Update urlPath
                                 doc.setUrlPath(urlPath);
                             }
@@ -769,7 +790,13 @@ public class PlacingAccountSIUDService {
 
             String placingCd = uspParam.getPlacingCd();
             String bookCd = uspParam.getBookCd();
-            String actionType = uspParam.getActionType().equalsIgnoreCase("4") ? "2" : uspParam.getActionType(); // 4 = Comparation Upadte
+            // Auto-resolve actionType for HEADER based on comparationCd presence
+            String actionTypeHdr;
+            if (comparationCd == null || comparationCd.isBlank()) {
+                actionTypeHdr = "1"; // create & generate code
+            } else {
+                actionTypeHdr = "2"; // update header
+            }
 
             String urlPath = null;
             String baseFolder = dataUtil.getPathUpload();
@@ -788,6 +815,30 @@ public class PlacingAccountSIUDService {
                     .collect(Collectors.toList());
 
             String docListJson = gson.toJson(docList);
+
+            // Emergency Force params
+            final boolean force = Boolean.TRUE.equals(uspParam.getForce());
+            final String forceMode = uspParam.getForceMode();
+            final String forceReason = uspParam.getForceReason();
+            final List<String> forcedInsurers = Optional.ofNullable(uspParam.getForcedInsurers()).orElse(List.of());
+
+            if (force) {
+                if (forcedInsurers.isEmpty()) {
+                    throw new IllegalArgumentException("forcedInsurers is required when force=true");
+                }
+                if (forceReason == null || forceReason.isBlank()) {
+                    throw new IllegalArgumentException("forceReason is required when force=true");
+                }
+            }
+            // Convert to NUMBER[] JSON (Long)
+            final List<Long> forcedInsNumeric = forcedInsurers.stream()
+                    .map(s -> {
+                        try { return Long.valueOf(s); } catch (Exception e) { return null; }
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            final String forcedInsJson = forcedInsNumeric.isEmpty() ? "[]" : gson.toJson(forcedInsNumeric);
+
             logger.info("baseFolder====>" + baseFolder);
             if (files != null && !files.isEmpty()) {
                 for (Map.Entry<String, MultipartFile> entry : files.entrySet()) {
@@ -795,18 +846,10 @@ public class PlacingAccountSIUDService {
                     MultipartFile file = entry.getValue();
 
                     if (file != null && !file.isEmpty()) {
-                        String docFolder = "comparation";
-                        String relativePath = serviceTool.saveFileWithBase(
-                                file,
-                                baseFolder,
-                                bookCd,
-                                revDoc,
-                                placingCd,
-                                revDoc,
-                                docFolder,
-                                "comparation"
+                        java.nio.file.Path savedPath = fileStorageService.saveWithOverwriteAndBackup(
+                                "comparation", bookCd, Integer.valueOf(revDoc), placingCd, "comparation", file, uspParam.getCreateBy()
                         );
-
+                        String relativePath = savedPath.toString().replace('\\', '/');
                         logger.info("📤 File uploaded for docType {}: {}", docType, relativePath);
                         urlPath = relativePath;
                         break;
@@ -843,8 +886,15 @@ public class PlacingAccountSIUDService {
                         new ProcedureParamModel("p_emailRemark", emailRemark, String.class, ParameterMode.IN),
                         new ProcedureParamModel("p_rev", revDoc, String.class, ParameterMode.IN),
                         new ProcedureParamModel("p_docListJson", docListJson, String.class, ParameterMode.IN),
+
+                        // Emergency Force params
+                        new ProcedureParamModel("p_force",       force ? "1" : "0", String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_forceMode",   forceMode,          String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_forceReason", force ? forceReason : null, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_forcedIns",   forcedInsJson,      String.class, ParameterMode.IN),
+
                         new ProcedureParamModel("p_user", user, String.class, ParameterMode.IN),
-                        new ProcedureParamModel("p_actionType", actionType, String.class, ParameterMode.IN),
+                        new ProcedureParamModel("p_actionType", actionTypeHdr, String.class, ParameterMode.IN),
                         new ProcedureParamModel("p_resultCode", null, Integer.class, ParameterMode.OUT),
                         new ProcedureParamModel("p_message", null, String.class, ParameterMode.OUT),
                         new ProcedureParamModel("p_resultJson", null, String.class, ParameterMode.OUT)
@@ -852,8 +902,22 @@ public class PlacingAccountSIUDService {
 
                 Map<String, Object> result = repository.callPlacingProcedure("USP_COMPARATION", procParams);
                 String resultJson = (String) result.get("p_resultJson");
+                logger.info("[USP_COMPARATION#{}] resultCode={}, message={}, p_resultJson={}",
+                            actionTypeHdr, result.get("p_resultCode"), result.get("p_message"), resultJson);
                 JsonObject obj = JsonParser.parseString(resultJson).getAsJsonObject();
-                comparationCd = obj.get("comparationCd").getAsString();
+
+                // Safe extraction of comparationCd
+                String spComparationCd = null;
+                if (obj.has("comparationCd") && !obj.get("comparationCd").isJsonNull()) {
+                    spComparationCd = obj.get("comparationCd").getAsString();
+                }
+                if ((comparationCd == null || comparationCd.isBlank()) && (spComparationCd != null && !spComparationCd.isBlank())) {
+                    comparationCd = spComparationCd;
+                    uspParam.setComparationCd(comparationCd);
+                }
+                if (comparationCd == null || comparationCd.isBlank()) {
+                    throw new IllegalStateException("SP did not return comparationCd for actionType=" + actionTypeHdr);
+                }
 
                 Map<String, Object> resultDtl = new HashMap<>();
                 int resultCode = (Integer) result.get("p_resultCode");
@@ -874,15 +938,38 @@ public class PlacingAccountSIUDService {
                             new ProcedureParamModel("p_emailRemark", emailRemark, String.class, ParameterMode.IN),
                             new ProcedureParamModel("p_rev", revDoc, String.class, ParameterMode.IN),
                             new ProcedureParamModel("p_docListJson", docListJson, String.class, ParameterMode.IN),
+
+                            // Emergency Force params
+                            new ProcedureParamModel("p_force",       force ? "1" : "0", String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_forceMode",   forceMode,          String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_forceReason", force ? forceReason : null, String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_forcedIns",   forcedInsJson,      String.class, ParameterMode.IN),
+
                             new ProcedureParamModel("p_user", user, String.class, ParameterMode.IN),
-                            new ProcedureParamModel("p_actionType", "3", String.class, ParameterMode.IN),
+                            new ProcedureParamModel("p_actionType", "4", String.class, ParameterMode.IN),
                             new ProcedureParamModel("p_resultCode", null, Integer.class, ParameterMode.OUT),
                             new ProcedureParamModel("p_message", null, String.class, ParameterMode.OUT),
                             new ProcedureParamModel("p_resultJson", null, String.class, ParameterMode.OUT)
                     );
                     resultDtl = repository.callPlacingProcedure("USP_COMPARATION", procParamsDetail);
+                    logger.info("[USP_COMPARATION#4] resultCode={}, message={}, p_resultJson={}",
+                                resultDtl.get("p_resultCode"), resultDtl.get("p_message"), (String) resultDtl.get("p_resultJson"));
                     resultCode = (Integer) resultDtl.get("p_resultCode");
                     if (resultCode == 200) {
+                        logger.info("✅ Comparation inserted successfully: comparationCd={}, placingCd={}, urlPath={}, description={}, emailRemark={}, revDoc={}, uspParam={}",
+                                comparationCd, placingCd, urlPath, description, emailRemark, revDoc, uspParam);
+                        uspParam.setComparationCd(comparationCd);
+
+                        // Optional: add disclaimer email when emergency force is applied
+                        if (force) {
+                            try {
+                                String forcedNames = String.join(", ", forcedInsurers);
+                                String disclaimer = "Emergency Compare applied to: " + forcedNames + ". Files for the current revision are pending.";
+                                String existing = uspParam.getEmailRemark();
+                                uspParam.setEmailRemark((existing == null || existing.isBlank()) ? disclaimer : (existing + "\n" + disclaimer));
+                            } catch (Exception ignore) {}
+                        }
+
                         responseGlobalModel = doProcessSendComparation(gson.toJson(uspParam));
                     }
                 }
@@ -1007,7 +1094,7 @@ public class PlacingAccountSIUDService {
                 .create();
         ComparationRequestModel uspParam = gson.fromJson(data, ComparationRequestModel.class);
         try {
-
+            logger.info("uspParamdoProcessSendComparation===> {}", new Gson().toJson(uspParam));
 
             String placingCd = uspParam.getPlacingCd();
             String bookCd = uspParam.getBookCd();
@@ -1025,7 +1112,7 @@ public class PlacingAccountSIUDService {
 
                 if (latestOpt.isPresent()) {
                     ComparationRequestModel.ComparationModel latest = latestOpt.get();
-                    String comparationCd = latest.getComparationCd();
+                    String comparationCd = uspParam.getComparationCd();
                     String description = latest.getDescription();
                     String emailRemark = latest.getEmailRemark();
                     String fileName = latest.getFileName();
